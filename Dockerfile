@@ -33,6 +33,8 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
         wine-mono \
         swaybg \
         grim \
+        btop \
+        nvtop \
         pipewire \
         pipewire-pulse \
         wireplumber \
@@ -81,6 +83,7 @@ RUN gcc -O2 -shared -fPIC -o /usr/lib/libglycin-nosandbox.so /tmp/glycin-nosandb
     && rm -f /tmp/glycin-nosandbox.c \
     && chmod 0755 /usr/local/bin/*.sh /usr/local/bin/input-broker.py \
     && chmod 0644 /config/sway/config.in /config/apollo/* /usr/share/vulcan/wallpaper.png \
-    && setcap -r /usr/bin/sway
+    && setcap -r /usr/bin/sway \
+    && setcap -r /usr/bin/btop
 
 ENTRYPOINT ["/usr/bin/catatonit", "--", "/usr/local/bin/entrypoint.sh"]
