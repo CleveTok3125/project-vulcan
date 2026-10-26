@@ -8,9 +8,10 @@
 # They are normally owned by the host "input" group. The container user must
 # be a member of the numeric GID of that group.
 # Keyboard and mouse devices created by inputtino are moved to a separate seat
-# so the host compositor does not react to streamed input.
+# and hidden from the host libinput stack. EVIOCGRAB in input-bridge provides
+# an additional guard while the container is running.
 
 KERNEL=="uinput", GROUP="input", MODE="0660"
 KERNEL=="uhid", GROUP="input", MODE="0660"
 
-SUBSYSTEM=="input", ATTRS{name}=="*passthrough*", ENV{ID_SEAT}="seat-vulcan", MODE="0660", GROUP="input"
+SUBSYSTEM=="input", ATTRS{name}=="*passthrough*", ENV{ID_SEAT}="seat-vulcan", ENV{LIBINPUT_IGNORE_DEVICE}="1", MODE="0660", GROUP="input"

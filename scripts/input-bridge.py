@@ -10,6 +10,7 @@ XTest instead of routing them through Sway.
 from __future__ import annotations
 
 import ctypes
+import fcntl
 import os
 import select
 import struct
@@ -20,23 +21,37 @@ SYSFS_DIR = "/sys/class/input"
 DEVICE_NAMES = {
     "Keyboard passthrough": "keyboard",
     "Mouse passthrough": "mouse",
+    "Mouse passthrough (absolute)": "mouse_absolute",
+    "Touch passthrough": "touch",
 }
 EVENT_SIZE = struct.calcsize("llHHi")
 POLL_SECONDS = 0.25
+SCREEN_WIDTH = int(os.environ.get("GAME_WIDTH", "1920"))
+SCREEN_HEIGHT = int(os.environ.get("GAME_HEIGHT", "1080"))
+
+EVIOCGRAB = 0x40044590
+EVIOCGABS = 0x80184540
 
 EV_KEY = 1
 EV_REL = 2
+EV_ABS = 3
 
 REL_X = 0
 REL_Y = 1
 REL_HWHEEL = 6
 REL_WHEEL = 8
 
+ABS_X = 0
+ABS_Y = 1
+ABS_MT_POSITION_X = 0x35
+ABS_MT_POSITION_Y = 0x36
+
 BTN_LEFT = 0x110
 BTN_RIGHT = 0x111
 BTN_MIDDLE = 0x112
 BTN_SIDE = 0x113
 BTN_EXTRA = 0x114
+BTN_TOUCH = 0x14A
 
 MOUSE_BUTTONS = {
     BTN_LEFT: 1,
@@ -44,6 +59,7 @@ MOUSE_BUTTONS = {
     BTN_RIGHT: 3,
     BTN_SIDE: 8,
     BTN_EXTRA: 9,
+    BTN_TOUCH: 1,
 }
 
 
@@ -81,6 +97,14 @@ class XTest:
             ctypes.c_ulong,
         ]
         self.xtst.XTestFakeRelativeMotionEvent.restype = ctypes.c_int
+        self.xtst.XTestFakeMotionEvent.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_ulong,
+        ]
+        self.xtst.XTestFakeMotionEvent.restype = ctypes.c_int
 
         self.display = self.x11.XOpenDisplay(display_name.encode())
         if not self.display:
@@ -100,6 +124,9 @@ class XTest:
     def motion(self, dx: int, dy: int) -> None:
         if dx or dy:
             self.xtst.XTestFakeRelativeMotionEvent(self.display, dx, dy, 0)
+
+    def absolute_motion(self, x: int, y: int) -> None:
+        self.xtst.XTestFakeMotionEvent(self.display, 0, x, y, 0)
 
     def flush(self) -> None:
         self.x11.XFlush(self.display)
@@ -129,13 +156,61 @@ def device_nodes() -> dict[str, str]:
     return nodes
 
 
-def handle_event(xtest: XTest, event_type: int, code: int, value: int) -> bool:
+def scale_axis(value: int, maximum: int, size: int) -> int:
+    if maximum <= 0:
+        maximum = 65535
+    scaled = round(value * (size - 1) / maximum)
+    return max(0, min(size - 1, scaled))
+
+
+def axis_range(fd: int) -> tuple[int, int]:
+    maximum_x = 65535
+    maximum_y = 65535
+    for axis in (ABS_X, ABS_MT_POSITION_X):
+        try:
+            raw = fcntl.ioctl(fd, EVIOCGABS + axis, bytes(24))
+            _, _, maximum, _, _, _ = struct.unpack("iiiiii", raw)
+            maximum_x = maximum if maximum > 0 else maximum_x
+            break
+        except OSError:
+            continue
+    for axis in (ABS_Y, ABS_MT_POSITION_Y):
+        try:
+            raw = fcntl.ioctl(fd, EVIOCGABS + axis, bytes(24))
+            _, _, maximum, _, _, _ = struct.unpack("iiiiii", raw)
+            maximum_y = maximum if maximum > 0 else maximum_y
+            break
+        except OSError:
+            continue
+    return maximum_x, maximum_y
+
+
+def handle_event(
+    xtest: XTest,
+    event_type: int,
+    code: int,
+    value: int,
+    ranges: tuple[int, int],
+    position: dict[str, int],
+) -> bool:
     if event_type == EV_KEY:
         if code in MOUSE_BUTTONS:
             xtest.button(MOUSE_BUTTONS[code], value != 0)
             return True
         if code < 0x100:
             xtest.key(code, value != 0)
+            return True
+        return False
+
+    if event_type == EV_ABS:
+        maximum_x, maximum_y = ranges
+        if code in (ABS_X, ABS_MT_POSITION_X):
+            position["x"] = scale_axis(value, maximum_x, SCREEN_WIDTH)
+            xtest.absolute_motion(position["x"], position["y"])
+            return True
+        if code in (ABS_Y, ABS_MT_POSITION_Y):
+            position["y"] = scale_axis(value, maximum_y, SCREEN_HEIGHT)
+            xtest.absolute_motion(position["x"], position["y"])
             return True
         return False
 
@@ -163,9 +238,15 @@ def handle_event(xtest: XTest, event_type: int, code: int, value: int) -> bool:
 
 def open_device(path: str) -> int | None:
     try:
-        return os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
     except OSError:
         return None
+    try:
+        fcntl.ioctl(fd, EVIOCGRAB, 1)
+        print(f"grabbed {path}", flush=True)
+    except OSError as error:
+        print(f"could not grab {path}: {error}", flush=True)
+    return fd
 
 
 def close_device(fd: int) -> None:
@@ -180,6 +261,8 @@ def main() -> int:
     xtest: XTest | None = None
     devices: dict[int, str] = {}
     buffers: dict[int, bytes] = {}
+    ranges: dict[int, tuple[int, int]] = {}
+    positions: dict[int, dict[str, int]] = {}
 
     print(f"watching input devices for display {display_name}", flush=True)
 
@@ -199,6 +282,8 @@ def main() -> int:
                 close_device(fd)
                 devices.pop(fd, None)
                 buffers.pop(fd, None)
+                ranges.pop(fd, None)
+                positions.pop(fd, None)
 
         for path in wanted:
             if path in devices.values():
@@ -208,6 +293,8 @@ def main() -> int:
                 continue
             devices[fd] = path
             buffers[fd] = b""
+            ranges[fd] = axis_range(fd)
+            positions[fd] = {"x": 0, "y": 0}
             print(f"opened {path}", flush=True)
 
         if not devices:
@@ -231,12 +318,16 @@ def main() -> int:
                 close_device(fd)
                 devices.pop(fd, None)
                 buffers.pop(fd, None)
+                ranges.pop(fd, None)
+                positions.pop(fd, None)
                 continue
 
             if not data:
                 close_device(fd)
                 devices.pop(fd, None)
                 buffers.pop(fd, None)
+                ranges.pop(fd, None)
+                positions.pop(fd, None)
                 continue
 
             buffer = buffers.get(fd, b"") + data
@@ -245,7 +336,14 @@ def main() -> int:
                 raw = buffer[:EVENT_SIZE]
                 buffer = buffer[EVENT_SIZE:]
                 _, _, event_type, code, value = struct.unpack("llHHi", raw)
-                if handle_event(xtest, event_type, code, value):
+                if handle_event(
+                    xtest,
+                    event_type,
+                    code,
+                    value,
+                    ranges.get(fd, (65535, 65535)),
+                    positions[fd],
+                ):
                     emitted = True
             buffers[fd] = buffer
             if emitted:

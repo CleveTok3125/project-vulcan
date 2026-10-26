@@ -30,6 +30,7 @@ SEQNUM = 0
 
 TARGETS = {
     "Mouse passthrough": "mouse",
+    "Mouse passthrough (absolute)": "mouse",
     "Keyboard passthrough": "keyboard",
     "Touch passthrough": "touchscreen",
     "Pen passthrough": "tablet",

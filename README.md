@@ -241,13 +241,27 @@ The default input broker exposes Apollo virtual gamepads by name:
 `Sunshine Nintendo (virtual) pad`. Extra names can be added with
 `INPUT_EXTRA_NAMES`.
 
-The host udev rule moves `*passthrough*` devices to `seat-vulcan`, preventing
-the host compositor from consuming streamed keyboard and mouse input.
+The host udev rule moves `*passthrough*` devices to `seat-vulcan` and sets
+`LIBINPUT_IGNORE_DEVICE`, preventing the host compositor from consuming
+streamed keyboard and mouse input. The bridge additionally grabs the event
+nodes with `EVIOCGRAB`.
 
-Sway headless has no libinput seat, so `input-bridge.py` reads the keyboard and
-mouse event nodes directly and injects them into the game's Xwayland display
-with XTest. With gamescope enabled, the bridge targets `:2`; without gamescope
-it targets Sway's Xwayland at `:1`. Override with `INPUT_DISPLAY`.
+Install and reload the rule after updating it:
+
+```bash
+sudo install -m 0644 host/99-vulcan-input.rules /etc/udev/rules.d/99-vulcan-input.rules
+sudo udevadm control --reload-rules
+sudo udevadm trigger --subsystem-match=input
+```
+
+Sway headless has no libinput seat, so `input-bridge.py` reads the keyboard,
+relative mouse, absolute mouse, and touch event nodes directly and injects
+them into the game's Xwayland display with XTest. With gamescope enabled, the
+bridge targets `:2`; without gamescope it targets Sway's Xwayland at `:1`.
+Override with `INPUT_DISPLAY`.
+
+Absolute mouse is mapped to absolute XTest motion. Touch is mapped as a single
+pointer; multi-touch is not supported by the XTest path.
 
 Set `INPUT_BRIDGE=0` to disable the bridge.
 
