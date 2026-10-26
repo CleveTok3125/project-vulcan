@@ -4,13 +4,10 @@ set -Eeuo pipefail
 export HOME="${HOME:-/data/home}"
 export XDG_DATA_HOME="${XDG_DATA_HOME:-/data/home/.local/share}"
 export WINEPREFIX="${WINEPREFIX:-/data/prefix}"
-export WINEDEBUG="${WINEDEBUG:--all}"
-
 export PROTONPATH="${PROTONPATH:-/data/spritz-wine-tkg}"
-export GAMEID="${GAMEID:-umu-zzz}"
-export STORE="${STORE:-none}"
-export PROTON_VERB="${PROTON_VERB:-waitforexitandrun}"
-export UMU_RUNTIME_UPDATE="${UMU_RUNTIME_UPDATE:-0}"
+export UMU_USE_STEAM="${UMU_USE_STEAM:-1}"
+export WINEDEBUG="${WINEDEBUG:--all}"
+export WINEARCH="${WINEARCH:-win64}"
 
 GAME_EXE="${GAME_EXE:-/games/zzz/ZenlessZoneZero.exe}"
 GAME_WIDTH="${GAME_WIDTH:-1920}"
@@ -21,17 +18,23 @@ GAMESCOPE_RT="${GAMESCOPE_RT:-0}"
 GAMESCOPE_GRAB_CURSOR="${GAMESCOPE_GRAB_CURSOR:-0}"
 GAMESCOPE_FORCE_WINDOWS_FULLSCREEN="${GAMESCOPE_FORCE_WINDOWS_FULLSCREEN:-1}"
 
-if [ ! -x "$PROTONPATH/proton" ] && [ ! -f "$PROTONPATH/proton" ]; then
-    printf '[vulcan] PROTONPATH does not look like a Proton tree: %s\n' "$PROTONPATH" >&2
-    exit 1
-fi
-
 if [ ! -e "$GAME_EXE" ]; then
     printf '[vulcan] game executable not found: %s\n' "$GAME_EXE" >&2
     exit 1
 fi
 
 cd "$(dirname "$GAME_EXE")"
+
+runner=()
+if [ -x "$PROTONPATH/bin/wine64" ]; then
+    runner=("$PROTONPATH/bin/wine64" "$GAME_EXE")
+elif [ -x "$PROTONPATH/proton" ]; then
+    printf '[vulcan] wine64 not found; falling back to proton\n' >&2
+    runner=(umu-run "$GAME_EXE")
+else
+    printf '[vulcan] no wine64 or proton under PROTONPATH: %s\n' "$PROTONPATH" >&2
+    exit 1
+fi
 
 if [ "$GAMESCOPE_ENABLED" = "1" ]; then
     args=(
@@ -52,7 +55,7 @@ if [ "$GAMESCOPE_ENABLED" = "1" ]; then
         args+=(--force-windows-fullscreen)
     fi
 
-    exec gamescope "${args[@]}" -- umu-run "$GAME_EXE"
+    exec gamescope "${args[@]}" -- "${runner[@]}"
 fi
 
-exec umu-run "$GAME_EXE"
+exec "${runner[@]}"

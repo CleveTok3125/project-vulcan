@@ -49,6 +49,7 @@ services:
     # because input and uinput often share the same host GID.
     volumes:
       - "${GAME_DIR:-/srv/games/zzz}:/games-ro/zzz:ro"
+      - "${SPRITZ_DIR:?set SPRITZ_DIR in .env.local}:/data/spritz-wine-tkg:ro"
       - "zzz-data:/data"
 
     environment:
@@ -74,6 +75,7 @@ services:
       APOLLO_PORT: "${APOLLO_PORT:-47989}"
 
       PROTONPATH: "${PROTONPATH:-/data/spritz-wine-tkg}"
+      UMU_USE_STEAM: "${UMU_USE_STEAM:-1}"
       UMU_RUNTIME_UPDATE: "${UMU_RUNTIME_UPDATE:-0}"
       UMU_LOG: "${UMU_LOG:-1}"
       GAMEID: "${GAMEID:-umu-zzz}"

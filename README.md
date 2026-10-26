@@ -13,7 +13,7 @@ Docker (rootful)
 └─ game container
    ├─ Hyprland HEADLESS-0 1920x1080@144
    ├─ gamescope (nested Wayland client, optional)
-   │  └─ umu-run + Proton + game
+   │  └─ wine64 + game
    ├─ Apollo (capture=wlr, NVENC)
    ├─ PipeWire null sink
    └─ input broker (uinput -> private /dev/input)
@@ -34,9 +34,12 @@ client and owns the game session inside the container.
 - Kernel modules `uinput` and `uhid`.
 - A host user with access to the Docker daemon.
 - Game files available under a host directory that can be mounted read-only.
-- Spritz-Wine-TkG extracted under `/data/spritz-wine-tkg` inside the container
-  volume, or adjust `PROTONPATH`.
-- `umu-run` runtime prefetched before setting `UMU_RUNTIME_UPDATE=0`.
+- Spritz-Wine-TkG or a Proton tree available on the host under `SPRITZ_DIR`;
+  it is mounted read-only at `/data/spritz-wine-tkg`.
+- A writable Wine prefix under `/data/prefix`. Seed it from an existing
+  launcher prefix before first launch if the game needs DXVK/Wine settings.
+- `umu-run` runtime prefetched before setting `UMU_RUNTIME_UPDATE=0` only when
+  the Proton fallback is used.
 
 ### Groups and udev
 
@@ -76,6 +79,7 @@ Example:
 
 ```dotenv
 GAME_DIR=/srv/games/zzz
+SPRITZ_DIR=/path/to/spritz-wine-tkg
 GID_INPUT=993
 GID_RENDER=992
 GID_VIDEO=986
@@ -86,6 +90,7 @@ APOLLO_NAME=Vulcan-ZZZ
 APOLLO_PORT=47989
 GAMESCOPE_FORCE_WINDOWS_FULLSCREEN=1
 RENDER_NODE=/dev/dri/renderD128
+UMU_USE_STEAM=1
 ```
 
 For AMD:
@@ -119,6 +124,30 @@ The Apollo web UI is available at `https://<host>:47990` by default
 (`APOLLO_PORT + 1`). Pair the first client from the web UI. The default app
 launches Zenless Zone Zero through `launch-zzz.sh`.
 
+### First run
+
+Build the image, then start the container:
+
+```bash
+docker compose --env-file .env.local -f compose.yaml -f compose.nvidia.yaml build
+docker compose --env-file .env.local -f compose.yaml -f compose.nvidia.yaml up -d
+docker compose --env-file .env.local -f compose.yaml -f compose.nvidia.yaml logs -f game
+```
+
+If the Wine prefix is empty and the game needs an existing DXVK/launcher
+prefix, copy it into the container volume before the first launch:
+
+```bash
+docker run --rm \
+  -v vulcan_zzz-data:/data \
+  -v /path/to/existing/prefix:/src:ro \
+  --entrypoint sh \
+  vulcan/game-stream:local \
+  -c 'mkdir -p /data/prefix && cp -a /src/. /data/prefix/'
+```
+
+Then restart the game container.
+
 ### NVIDIA CDI
 
 The base compose file passes the render node and input devices, but NVIDIA
@@ -146,9 +175,10 @@ Defaults:
 - Hyprland: `HEADLESS-0`, `1920x1080@144`.
 - gamescope: `--backend wayland`, fullscreen, 1920x1080@144.
 - Game executable: `/games/zzz/ZenlessZoneZero.exe`.
-- Proton: `/data/spritz-wine-tkg` through `umu-run`.
+- Wine: `/data/spritz-wine-tkg/bin/wine64`, with `UMU_USE_STEAM=1`.
+- A Proton tree is used only as a fallback when `bin/wine64` is absent.
 
-Change resolution or FPS in `.env`:
+Change resolution or FPS in `.env.local`:
 
 - `GAME_WIDTH`, `GAME_HEIGHT`, `GAME_FPS`
 - `RENDER_NODE` if the host render node is not `/dev/dri/renderD128`
