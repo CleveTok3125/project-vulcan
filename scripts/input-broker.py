@@ -18,6 +18,7 @@ import socket
 import stat
 import sys
 import time
+import traceback
 
 INPUT_DIR = "/dev/input"
 UDEV_RUN = "/run/udev"
@@ -127,9 +128,15 @@ def expose(event: str, device_type: str, input_gid: int) -> bool:
     devname = f"input/{event}"
     node = f"/dev/{devname}"
     if not os.path.exists(node):
-        os.mknod(node, stat.S_IFCHR | 0o660, os.makedev(major, minor))
-    os.chown(node, 0, input_gid)
-    os.chmod(node, 0o660)
+        os.mknod(node, stat.S_IFCHR | 0o666, os.makedev(major, minor))
+    try:
+        os.chown(node, 0, input_gid)
+    except OSError as error:
+        print(f"chown {node} failed: {error}", flush=True)
+    try:
+        os.chmod(node, 0o666)
+    except OSError as error:
+        print(f"chmod {node} failed: {error}", flush=True)
 
     devpath = os.path.realpath(f"/sys/class/input/{event}")
     if devpath.startswith("/sys"):
@@ -169,6 +176,7 @@ def main() -> int:
                     baseline.add(event)
             except OSError as error:
                 print(f"failed to expose {event} ({name}): {error}", flush=True)
+                traceback.print_exc()
                 baseline.add(event)
         time.sleep(POLL_SECONDS)
 

@@ -30,6 +30,9 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
         libva-utils \
         ffmpeg \
         gamescope \
+        wine-mono \
+        swaybg \
+        grim \
         pipewire \
         pipewire-pulse \
         wireplumber \
@@ -70,10 +73,14 @@ RUN mkdir -p /config/apollo /data /games/zzz /games-ro/zzz \
 
 COPY config/sway /config/sway
 COPY config/apollo /config/apollo
+COPY assets /usr/share/vulcan
 COPY scripts /usr/local/bin
+COPY scripts/glycin-nosandbox.c /tmp/glycin-nosandbox.c
 
-RUN chmod 0755 /usr/local/bin/*.sh /usr/local/bin/input-broker.py \
-    && chmod 0644 /config/sway/config.in /config/apollo/* \
+RUN gcc -O2 -shared -fPIC -o /usr/lib/libglycin-nosandbox.so /tmp/glycin-nosandbox.c -ldl \
+    && rm -f /tmp/glycin-nosandbox.c \
+    && chmod 0755 /usr/local/bin/*.sh /usr/local/bin/input-broker.py \
+    && chmod 0644 /config/sway/config.in /config/apollo/* /usr/share/vulcan/wallpaper.png \
     && setcap -r /usr/bin/sway
 
 ENTRYPOINT ["/usr/bin/catatonit", "--", "/usr/local/bin/entrypoint.sh"]

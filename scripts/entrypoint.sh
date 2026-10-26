@@ -51,10 +51,11 @@ GID_INPUT="${GID_INPUT:-$(read_gid /dev/uinput)}"
 GID_RENDER="${GID_RENDER:-$(read_gid /dev/dri/renderD128)}"
 GID_VIDEO="${GID_VIDEO:-$(read_gid /dev/dri/renderD128)}"
 GID_UINPUT="${GID_UINPUT:-$(read_gid /dev/uinput)}"
+GID_STORAGE="${GID_STORAGE:-$(read_gid /dev/dri/card0)}"
 GID_SEAT="$(getent group seat | cut -d: -f3 || true)"
 
 GROUP_LIST="$(
-    printf '%s\n' "$GID_INPUT" "$GID_RENDER" "$GID_VIDEO" "$GID_UINPUT" "$GID_SEAT" \
+    printf '%s\n' "$GID_INPUT" "$GID_RENDER" "$GID_VIDEO" "$GID_UINPUT" "$GID_STORAGE" "$GID_SEAT" \
         | awk '/^[0-9]+$/ && $1 != 0' \
         | sort -nu \
         | paste -sd, -
@@ -118,7 +119,7 @@ RENDER_NODE="${RENDER_NODE:-/dev/dri/renderD128}"
 GAME_WIDTH="${GAME_WIDTH:-1920}"
 GAME_HEIGHT="${GAME_HEIGHT:-1080}"
 GAME_FPS="${GAME_FPS:-144}"
-GAME_MODE="${GAME_WIDTH}x${GAME_HEIGHT}@${GAME_FPS}"
+GAME_MODE="${GAME_WIDTH}x${GAME_HEIGHT}@${GAME_FPS}Hz"
 
 install -d -m 0755 /data/sway
 

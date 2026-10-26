@@ -1,7 +1,9 @@
 # Vulcan headless Sway configuration.
 
 output HEADLESS-1 resolution @MODE@ position 0 0
-output HEADLESS-1 bg #000000 solid_color
+swaybg_command /usr/local/bin/swaybg-vulcan.sh
+
+output HEADLESS-1 bg /usr/share/vulcan/wallpaper.png fill
 
 default_border none
 default_floating_border none

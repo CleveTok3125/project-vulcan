@@ -43,6 +43,7 @@ services:
       - DAC_OVERRIDE
       - SETUID
       - SETGID
+      - NET_ADMIN
 
     security_opt:
       - no-new-privileges:true
@@ -53,6 +54,7 @@ services:
     volumes:
       - "${GAME_DIR:-/srv/games/zzz}:/games-ro/zzz:ro"
       - "${SPRITZ_DIR:?set SPRITZ_DIR in .env.local}:/data/spritz-wine-tkg:ro"
+      - "${DXVK_HOST_DIR:-/usr/share/dxvk}:/data/dxvk:ro"
       - "zzz-data:/data"
 
     environment:
@@ -66,7 +68,7 @@ services:
       GAMESCOPE_GRAB_CURSOR: "${GAMESCOPE_GRAB_CURSOR:-0}"
       GAMESCOPE_FORCE_WINDOWS_FULLSCREEN: "${GAMESCOPE_FORCE_WINDOWS_FULLSCREEN:-1}"
       INPUT_BROKER: "${INPUT_BROKER:-1}"
-      INPUT_EXTRA_NAMES: "${INPUT_EXTRA_NAMES:-}"
+      INPUT_EXTRA_NAMES: "${INPUT_EXTRA_NAMES:-Sunshine X-Box One (virtual) pad,Sunshine PS5 (virtual) pad,Sunshine Nintendo (virtual) pad}"
       ENABLE_OVERLAY: "${ENABLE_OVERLAY:-1}"
 
       RENDER_NODE: "${RENDER_NODE:-/dev/dri/renderD128}"
@@ -78,6 +80,8 @@ services:
 
       WINE_ROOT: "${WINE_ROOT:-/data/spritz-wine-tkg}"
       UMU_USE_STEAM: "${UMU_USE_STEAM:-1}"
+      D3D_BACKEND: "${D3D_BACKEND:-dxvk}"
+      DXVK_DIR: "/data/dxvk"
 
       # NVIDIA device nodes are supplied by compose.nvidia.yaml.
       NVIDIA_VISIBLE_DEVICES: "${NVIDIA_VISIBLE_DEVICES:-0}"
@@ -87,6 +91,7 @@ services:
       GID_RENDER: "${GID_RENDER:?set GID_RENDER in .env}"
       GID_VIDEO: "${GID_VIDEO:?set GID_VIDEO in .env}"
       GID_UINPUT: "${GID_UINPUT:?set GID_UINPUT in .env}"
+      GID_STORAGE: "${GID_STORAGE:-}"
 
     shm_size: "2gb"
 

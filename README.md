@@ -236,11 +236,17 @@ It creates the corresponding event nodes in the container's private
 `/dev/input`, writes udev database records, and emits udev netlink events so
 libinput can hotplug them.
 
-Extra device names, for example a virtual gamepad, can be added with
+The default input broker exposes Apollo virtual gamepads by name:
+`Sunshine X-Box One (virtual) pad`, `Sunshine PS5 (virtual) pad`, and
+`Sunshine Nintendo (virtual) pad`. Extra names can be added with
 `INPUT_EXTRA_NAMES`.
 
 The host udev rule moves `*passthrough*` devices to `seat-vulcan`, preventing
 the host compositor from consuming streamed keyboard and mouse input.
+
+Sway headless has no libinput seat, so keyboard and mouse events are not
+routed to Sway yet. Virtual gamepads are exposed as evdev nodes and are read
+directly by the game.
 
 ### Known input limitation
 
