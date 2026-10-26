@@ -2,7 +2,7 @@
 
 Containerized headless game streaming for Apollo.
 
-One container runs one game on a private headless Hyprland display. Apollo
+One container runs one game on a private headless Sway display. Apollo
 captures that display with `capture=wlr`, and gamescope can host the game as a
 fullscreen client. The host's graphical session is not used.
 
@@ -11,7 +11,7 @@ fullscreen client. The host's graphical session is not used.
 ```text
 Docker (rootful)
 └─ game container
-   ├─ Hyprland HEADLESS-0 1920x1080@144
+   ├─ Sway HEADLESS-1 1920x1080@144
    ├─ gamescope (nested Wayland client, optional)
    │  └─ wine64 + game
    ├─ Apollo (capture=wlr, NVENC)
@@ -20,12 +20,15 @@ Docker (rootful)
 ```
 
 Only `/dev/dri/renderD128` is passed to the container. `/dev/dri/card*` is
-never passed, so Hyprland cannot take DRM master from the host session.
+never passed, so Sway cannot take DRM master from the host session.
 
-Hyprland is required as the capture surface: gamescope does not expose
+Sway is the capture surface: gamescope does not expose
 `zwlr_screencopy_manager_v1`, and Apollo on Linux does not currently provide a
 PipeWire capture backend. gamescope therefore runs nested as a fullscreen
 client and owns the game session inside the container.
+
+Hyprland is not used because its Aquamarine backend requires an active seat/VT,
+which is not available in this container.
 
 ## Host prerequisites
 
@@ -38,8 +41,7 @@ client and owns the game session inside the container.
   it is mounted read-only at `/data/spritz-wine-tkg`.
 - A writable Wine prefix under `/data/prefix`. Seed it from an existing
   launcher prefix before first launch if the game needs DXVK/Wine settings.
-- `umu-run` runtime prefetched before setting `UMU_RUNTIME_UPDATE=0` only when
-  the Proton fallback is used.
+- `WINE_ROOT` points at a Wine tree with `bin/wine64`.
 
 ### Groups and udev
 
@@ -61,6 +63,15 @@ stat -c '%g' /dev/uinput
 
 `GID_UINPUT` is the group that owns `/dev/uinput`, usually the same as
 `GID_INPUT`.
+
+## Build cache
+
+The base image is pinned by digest and the package database/package cache are
+BuildKit cache mounts. Changing only `scripts/` or `config/` reuses the
+package and Apollo build layers.
+
+The first build after a Dockerfile package-list change still downloads the new
+packages once. Do not use `--no-cache` for normal rebuilds.
 
 ## Configuration
 
@@ -148,11 +159,11 @@ docker run --rm \
 
 Then restart the game container.
 
-### NVIDIA CDI
+### NVIDIA devices
 
-The base compose file passes the render node and input devices, but NVIDIA
-userland libraries and `/dev/nvidia*` need CDI or the NVIDIA runtime. Use the
-CDI override:
+The image includes NVIDIA userland libraries, so the compose override passes
+the host driver nodes directly. Keep the override in sync with the host GPU
+node names and rebuild the image after a major driver update.
 
 ```bash
 docker compose --env-file .env.local -f compose.yaml -f compose.nvidia.yaml up -d
@@ -172,19 +183,18 @@ Expected: `renderD128` and NVIDIA control/device nodes; no `card0`.
 
 Defaults:
 
-- Hyprland: `HEADLESS-0`, `1920x1080@144`.
+- Sway: `HEADLESS-1`, `1920x1080@144`.
 - gamescope: `--backend wayland`, fullscreen, 1920x1080@144.
 - Game executable: `/games/zzz/ZenlessZoneZero.exe`.
 - Wine: `/data/spritz-wine-tkg/bin/wine64`, with `UMU_USE_STEAM=1`.
-- A Proton tree is used only as a fallback when `bin/wine64` is absent.
 
 Change resolution or FPS in `.env.local`:
 
 - `GAME_WIDTH`, `GAME_HEIGHT`, `GAME_FPS`
 - `RENDER_NODE` if the host render node is not `/dev/dri/renderD128`
 
-The Hyprland config is rendered from `config/hypr/hyprland.lua.in` at startup,
-so the template only needs editing for structural changes.
+The Sway config is rendered from `config/sway/config.in` at startup, so the
+template only needs editing for structural changes.
 
 Disable gamescope for the lower-latency direct path:
 
@@ -259,15 +269,12 @@ Additional hardening:
 ## Limitations
 
 - One active game container at a time.
-- Apollo Linux has no Windows-style virtual display; Hyprland provides it.
+- Apollo Linux has no Windows-style virtual display; Sway provides it.
 - HDR is not implemented in this scaffold.
 - mDNS is not configured. Pair manually through the Apollo web UI, or add the
   host Avahi socket to the container.
 - gamescope adds a second compositor. Disable it if latency or frame pacing is
   worse.
-- NVIDIA render-only Hyprland is the first risk to validate. If Aquamarine
-  fails, use a Sway/wlroots headless parent or a different compositor while
-  keeping Apollo.
 - Docker AppArmor may block `mknod`; test or install a custom profile.
 
 ## Validation checklist
@@ -276,14 +283,14 @@ Additional hardening:
 # inside container
 ls -l /dev/dri
 ls -l /dev/input
-hyprctl monitors
+swaymsg -t get_outputs
 vulkaninfo --summary
 ffmpeg -hide_banner -encoders | grep nvenc
 ```
 
 Expected:
 
-- `HEADLESS-0` at 1920x1080@144
+- `HEADLESS-1` at 1920x1080@144
 - no `/dev/dri/card0`
 - only expected input event nodes
 - Apollo logs show `Screencasting with Wayland's protocol`

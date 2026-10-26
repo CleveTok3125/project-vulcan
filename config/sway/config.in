@@ -1,0 +1,20 @@
+# Vulcan headless Sway configuration.
+
+output HEADLESS-1 resolution @MODE@ position 0 0
+output HEADLESS-1 bg #000000 solid_color
+
+default_border none
+default_floating_border none
+hide_edge_borders both
+gaps inner 0
+gaps outer 0
+focus_follows_mouse no
+mouse_warping none
+
+xwayland enable
+
+# gamescope is the only visible client. It also requests fullscreen itself.
+for_window [app_id="gamescope"] fullscreen enable
+for_window [class="gamescope"] fullscreen enable
+
+exec_always /usr/local/bin/session-start.sh

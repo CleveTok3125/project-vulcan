@@ -4,7 +4,7 @@ origin_web_ui_allowed = lan
 address_family = both
 
 capture = wlr
-output_name = HEADLESS-0
+output_name = @OUTPUT@
 encoder = @ENCODER@
 adapter_name = @ADAPTER@
 

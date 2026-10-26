@@ -1,14 +1,16 @@
 # syntax=docker/dockerfile:1
 
-# Arch is used because Hyprland, gamescope and umu-launcher are current there.
+# Arch is used because Sway and gamescope are current there.
 # Pin the base image digest before publishing a reproducible build.
-FROM archlinux:base
+FROM archlinux:base@sha256:52dfbd5afb23a220d5ee92dafcb4c788d96c026ed04179890c23adef4c897fa0
 
 ARG GPU_VENDOR=nvidia
 ARG INSTALL_CUDA=1
 ARG APOLLO_PKG=apollo
 
-RUN pacman -Syu --noconfirm --needed \
+RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
+    --mount=type=cache,target=/var/lib/pacman/sync,sharing=locked \
+    pacman -Syu --noconfirm --needed \
         base-devel \
         git \
         sudo \
@@ -16,10 +18,10 @@ RUN pacman -Syu --noconfirm --needed \
         gettext \
         jq \
         python \
-        tini \
+        catatonit \
         util-linux \
-        seatd \
-        hyprland \
+        sway \
+        libcap \
         xorg-xwayland \
         mesa \
         vulkan-icd-loader \
@@ -28,7 +30,6 @@ RUN pacman -Syu --noconfirm --needed \
         libva-utils \
         ffmpeg \
         gamescope \
-        umu-launcher \
         pipewire \
         pipewire-pulse \
         wireplumber \
@@ -39,8 +40,7 @@ RUN pacman -Syu --noconfirm --needed \
         if [ "$INSTALL_CUDA" = "1" ]; then pacman -S --noconfirm --needed cuda; fi; \
     else \
         pacman -S --noconfirm --needed vulkan-radeon libva-mesa-driver; \
-    fi \
-    && pacman -Scc --noconfirm
+    fi
 
 # AUR packages cannot be built by root.
 RUN useradd -m -u 1001 builder \
@@ -49,7 +49,9 @@ RUN useradd -m -u 1001 builder \
 
 USER builder
 WORKDIR /home/builder
-RUN git clone --depth 1 "https://aur.archlinux.org/${APOLLO_PKG}.git" "/home/builder/${APOLLO_PKG}" \
+RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
+    --mount=type=cache,target=/var/lib/pacman/sync,sharing=locked \
+    git clone --depth 1 "https://aur.archlinux.org/${APOLLO_PKG}.git" "/home/builder/${APOLLO_PKG}" \
     && cd "/home/builder/${APOLLO_PKG}" \
     && makepkg -si --noconfirm
 
@@ -66,11 +68,12 @@ RUN groupadd -f uinput \
 RUN mkdir -p /config/apollo /data /games/zzz /games-ro/zzz \
     && chown -R 1000:1000 /data /games
 
-COPY config/hypr /config/hypr
+COPY config/sway /config/sway
 COPY config/apollo /config/apollo
 COPY scripts /usr/local/bin
 
 RUN chmod 0755 /usr/local/bin/*.sh /usr/local/bin/input-broker.py \
-    && chmod 0644 /config/hypr/hyprland.lua.in /config/apollo/*
+    && chmod 0644 /config/sway/config.in /config/apollo/* \
+    && setcap -r /usr/bin/sway
 
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
+ENTRYPOINT ["/usr/bin/catatonit", "--", "/usr/local/bin/entrypoint.sh"]

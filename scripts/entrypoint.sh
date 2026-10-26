@@ -18,11 +18,14 @@ export XDG_CACHE_HOME="/data/home/.cache"
 export XDG_DATA_HOME="/data/home/.local/share"
 export HOME="/data/home"
 
-install -d -m 0755 /data /data/apollo /data/apollo/credentials /data/home /data/log /data/prefix /data/overlay
+install -d -m 0755 /data
+install -d -m 0755 -o "$GAME_UID" -g "$GAME_GID" \
+    /data/apollo /data/apollo/credentials /data/home /data/log /data/prefix /data/overlay
 install -d -m 0700 -o "$GAME_UID" -g "$GAME_GID" "$XDG_RUNTIME_DIR"
 install -d -m 0755 /dev/input /run/udev /run/udev/data
 touch /run/udev/control
-chown -R "$GAME_UID:$GAME_GID" /data
+chown "$GAME_UID:$GAME_GID" /data
+chown -R "$GAME_UID:$GAME_GID" /data/apollo /data/home /data/log /data/prefix /data/overlay
 
 if [ "${ENABLE_OVERLAY:-1}" = "1" ]; then
     if [ ! -d /games-ro/zzz ]; then
@@ -59,7 +62,7 @@ GROUP_LIST="$(
 
 as_game() {
     if [ -n "$GROUP_LIST" ]; then
-        setpriv --reuid="$GAME_UID" --regid="$GAME_GID" --clear-groups --groups "$GROUP_LIST" -- "$@"
+        setpriv --reuid="$GAME_UID" --regid="$GAME_GID" --groups "$GROUP_LIST" -- "$@"
     else
         setpriv --reuid="$GAME_UID" --regid="$GAME_GID" --clear-groups -- "$@"
     fi
@@ -83,8 +86,6 @@ as_game env \
     DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
     XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
     wireplumber >/data/log/wireplumber.log 2>&1 &
-
-seatd -g seat >/data/log/seatd.log 2>&1 &
 
 sleep 1
 
@@ -112,49 +113,49 @@ APOLLO_ENCODER="${APOLLO_ENCODER:-nvenc}"
 APOLLO_NAME="${APOLLO_NAME:-Vulcan-ZZZ}"
 APOLLO_PORT="${APOLLO_PORT:-47989}"
 APOLLO_ADAPTER="${APOLLO_ADAPTER:-}"
+APOLLO_OUTPUT="${APOLLO_OUTPUT:-HEADLESS-1}"
 RENDER_NODE="${RENDER_NODE:-/dev/dri/renderD128}"
 GAME_WIDTH="${GAME_WIDTH:-1920}"
 GAME_HEIGHT="${GAME_HEIGHT:-1080}"
 GAME_FPS="${GAME_FPS:-144}"
+GAME_MODE="${GAME_WIDTH}x${GAME_HEIGHT}@${GAME_FPS}"
 
-install -d -m 0755 /data/hypr
+install -d -m 0755 /data/sway
 
 sed \
     -e "s|@ENCODER@|${APOLLO_ENCODER}|g" \
     -e "s|@NAME@|${APOLLO_NAME}|g" \
     -e "s|@PORT@|${APOLLO_PORT}|g" \
     -e "s|@ADAPTER@|${APOLLO_ADAPTER}|g" \
+    -e "s|@OUTPUT@|${APOLLO_OUTPUT}|g" \
     /config/apollo/sunshine.conf.in >/data/apollo/sunshine.conf
 
 sed \
-    -e "s|@RENDER_NODE@|${RENDER_NODE}|g" \
-    -e "s|@GAME_WIDTH@|${GAME_WIDTH}|g" \
-    -e "s|@GAME_HEIGHT@|${GAME_HEIGHT}|g" \
-    -e "s|@GAME_FPS@|${GAME_FPS}|g" \
-    /config/hypr/hyprland.lua.in >/data/hypr/hyprland.lua
+    -e "s|@MODE@|${GAME_MODE}|g" \
+    /config/sway/config.in >/data/sway/config
 
 if [ -z "$APOLLO_ADAPTER" ]; then
-    sed -i '/^adapter_name = $/d' /data/apollo/sunshine.conf
+    grep -v '^adapter_name = $' /data/apollo/sunshine.conf >/data/apollo/sunshine.conf.tmp
+    mv /data/apollo/sunshine.conf.tmp /data/apollo/sunshine.conf
 fi
 
-chown "$GAME_UID:$GAME_GID" /data/apollo/sunshine.conf /data/hypr/hyprland.lua
+chown "$GAME_UID:$GAME_GID" /data/apollo/sunshine.conf /data/sway/config
 
-log "starting Hyprland"
+log "starting Sway"
 as_game env \
     DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
     XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
     PULSE_SERVER="$PULSE_SERVER" \
     XDG_SESSION_TYPE=wayland \
-    XDG_CURRENT_DESKTOP=Hyprland \
-    LIBSEAT_BACKEND=seatd \
-    SEATD_SOCK=/run/seatd.sock \
-    AQ_NO_KMS_REQUIREMENT=1 \
-    AQ_DRM_DEVICES="$RENDER_NODE" \
-    Hyprland --config /data/hypr/hyprland.lua \
-    >/data/log/hyprland.log 2>&1 &
+    XDG_CURRENT_DESKTOP=sway \
+    WLR_BACKENDS=headless \
+    WLR_RENDER_DRM_DEVICE="$RENDER_NODE" \
+    WLR_RENDERER_ALLOW_SOFTWARE=1 \
+    sway -c /data/sway/config \
+    >/data/log/sway.log 2>&1 &
 
-HYPR_PID=$!
+SWAY_PID=$!
 trap 'kill $(jobs -p) 2>/dev/null || true' EXIT INT TERM
 
-log "Hyprland pid ${HYPR_PID}"
-wait "$HYPR_PID" || true
+log "Sway pid ${SWAY_PID}"
+wait "$SWAY_PID" || true

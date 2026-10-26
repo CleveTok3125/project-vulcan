@@ -21,11 +21,9 @@ services:
       - /run:size=512m
       - /var:size=1g
 
-    # Only the render node is exposed. Never add /dev/dri/card*.
-    # For NVIDIA CDI, add "nvidia.com/gpu=0" to devices instead of --gpus all
-    # when the local Docker version supports CDI devices.
+    # Only the selected render node is exposed. Never add /dev/dri/card*.
     devices:
-      - /dev/dri/renderD128
+      - "${RENDER_NODE:-/dev/dri/renderD128}"
       - /dev/uinput
       - /dev/uhid
 
@@ -40,6 +38,11 @@ services:
       - MKNOD
       # Required only when ENABLE_OVERLAY=1. Remove it if overlay is disabled.
       - SYS_ADMIN
+      # The entrypoint prepares /data before dropping to the game user.
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
 
     security_opt:
       - no-new-privileges:true
@@ -66,21 +69,17 @@ services:
       INPUT_EXTRA_NAMES: "${INPUT_EXTRA_NAMES:-}"
       ENABLE_OVERLAY: "${ENABLE_OVERLAY:-1}"
 
-      AQ_NO_KMS_REQUIREMENT: "1"
-      AQ_DRM_DEVICES: "${RENDER_NODE:-/dev/dri/renderD128}"
       RENDER_NODE: "${RENDER_NODE:-/dev/dri/renderD128}"
+      APOLLO_OUTPUT: "${APOLLO_OUTPUT:-HEADLESS-1}"
       APOLLO_ENCODER: "${APOLLO_ENCODER:-nvenc}"
       APOLLO_ADAPTER: "${APOLLO_ADAPTER:-}"
       APOLLO_NAME: "${APOLLO_NAME:-Vulcan-ZZZ}"
       APOLLO_PORT: "${APOLLO_PORT:-47989}"
 
-      PROTONPATH: "${PROTONPATH:-/data/spritz-wine-tkg}"
+      WINE_ROOT: "${WINE_ROOT:-/data/spritz-wine-tkg}"
       UMU_USE_STEAM: "${UMU_USE_STEAM:-1}"
-      UMU_RUNTIME_UPDATE: "${UMU_RUNTIME_UPDATE:-0}"
-      UMU_LOG: "${UMU_LOG:-1}"
-      GAMEID: "${GAMEID:-umu-zzz}"
 
-      # NVIDIA Container Toolkit options. Ignored by an AMD image.
+      # NVIDIA device nodes are supplied by compose.nvidia.yaml.
       NVIDIA_VISIBLE_DEVICES: "${NVIDIA_VISIBLE_DEVICES:-0}"
       NVIDIA_DRIVER_CAPABILITIES: "all"
 
