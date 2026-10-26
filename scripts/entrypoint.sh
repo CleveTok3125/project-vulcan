@@ -110,6 +110,28 @@ if [ "${INPUT_BROKER:-1}" = "1" ]; then
         >/data/log/input-broker.log 2>&1 &
 fi
 
+if [ "${INPUT_BRIDGE:-1}" = "1" ]; then
+    INPUT_DISPLAY="${INPUT_DISPLAY:-}"
+    if [ -z "$INPUT_DISPLAY" ]; then
+        if [ "${GAMESCOPE_ENABLED:-1}" = "1" ]; then
+            INPUT_DISPLAY=":2"
+        else
+            INPUT_DISPLAY=":1"
+        fi
+    fi
+    : >/data/log/input-bridge.log
+    (
+        while true; do
+            as_game env \
+                XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
+                DISPLAY="$INPUT_DISPLAY" \
+                python3 /usr/local/bin/input-bridge.py \
+                >>/data/log/input-bridge.log 2>&1 || true
+            sleep 1
+        done
+    ) &
+fi
+
 APOLLO_ENCODER="${APOLLO_ENCODER:-nvenc}"
 APOLLO_NAME="${APOLLO_NAME:-Vulcan-ZZZ}"
 APOLLO_PORT="${APOLLO_PORT:-47989}"

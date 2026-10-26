@@ -81,7 +81,7 @@ COPY scripts/glycin-nosandbox.c /tmp/glycin-nosandbox.c
 
 RUN gcc -O2 -shared -fPIC -o /usr/lib/libglycin-nosandbox.so /tmp/glycin-nosandbox.c -ldl \
     && rm -f /tmp/glycin-nosandbox.c \
-    && chmod 0755 /usr/local/bin/*.sh /usr/local/bin/input-broker.py \
+    && chmod 0755 /usr/local/bin/*.sh /usr/local/bin/input-broker.py /usr/local/bin/input-bridge.py \
     && chmod 0644 /config/sway/config.in /config/apollo/* /usr/share/vulcan/wallpaper.png \
     && setcap -r /usr/bin/sway \
     && setcap -r /usr/bin/btop

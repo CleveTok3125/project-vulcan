@@ -127,8 +127,11 @@ def expose(event: str, device_type: str, input_gid: int) -> bool:
 
     devname = f"input/{event}"
     node = f"/dev/{devname}"
-    if not os.path.exists(node):
-        os.mknod(node, stat.S_IFCHR | 0o666, os.makedev(major, minor))
+    try:
+        os.unlink(node)
+    except FileNotFoundError:
+        pass
+    os.mknod(node, stat.S_IFCHR | 0o666, os.makedev(major, minor))
     try:
         os.chown(node, 0, input_gid)
     except OSError as error:
@@ -157,7 +160,7 @@ def main() -> int:
         if name.strip()
     }
 
-    baseline = set(event_names())
+    baseline = set(event_names().items())
     print(
         f"watching for Apollo input devices; baseline={len(baseline)} "
         f"input_gid={input_gid}",
@@ -165,19 +168,21 @@ def main() -> int:
     )
 
     while True:
-        for event, name in event_names().items():
-            if event in baseline:
+        current = event_names()
+        baseline &= set(current.items())
+        for event, name in current.items():
+            if (event, name) in baseline:
                 continue
             device_type = classify(name, extra_names)
             if device_type is None:
                 continue
             try:
                 if expose(event, device_type, input_gid):
-                    baseline.add(event)
+                    baseline.add((event, name))
             except OSError as error:
                 print(f"failed to expose {event} ({name}): {error}", flush=True)
                 traceback.print_exc()
-                baseline.add(event)
+                baseline.add((event, name))
         time.sleep(POLL_SECONDS)
 
 

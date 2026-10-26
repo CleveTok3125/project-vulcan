@@ -244,9 +244,14 @@ The default input broker exposes Apollo virtual gamepads by name:
 The host udev rule moves `*passthrough*` devices to `seat-vulcan`, preventing
 the host compositor from consuming streamed keyboard and mouse input.
 
-Sway headless has no libinput seat, so keyboard and mouse events are not
-routed to Sway yet. Virtual gamepads are exposed as evdev nodes and are read
-directly by the game.
+Sway headless has no libinput seat, so `input-bridge.py` reads the keyboard and
+mouse event nodes directly and injects them into the game's Xwayland display
+with XTest. With gamescope enabled, the bridge targets `:2`; without gamescope
+it targets Sway's Xwayland at `:1`. Override with `INPUT_DISPLAY`.
+
+Set `INPUT_BRIDGE=0` to disable the bridge.
+
+Virtual gamepads are exposed as evdev nodes and are read directly by the game.
 
 ### Known input limitation
 

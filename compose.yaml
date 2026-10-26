@@ -68,6 +68,8 @@ services:
       GAMESCOPE_GRAB_CURSOR: "${GAMESCOPE_GRAB_CURSOR:-0}"
       GAMESCOPE_FORCE_WINDOWS_FULLSCREEN: "${GAMESCOPE_FORCE_WINDOWS_FULLSCREEN:-1}"
       INPUT_BROKER: "${INPUT_BROKER:-1}"
+      INPUT_BRIDGE: "${INPUT_BRIDGE:-1}"
+      INPUT_DISPLAY: "${INPUT_DISPLAY:-}"
       INPUT_EXTRA_NAMES: "${INPUT_EXTRA_NAMES:-Sunshine X-Box One (virtual) pad,Sunshine PS5 (virtual) pad,Sunshine Nintendo (virtual) pad}"
       ENABLE_OVERLAY: "${ENABLE_OVERLAY:-1}"
 
