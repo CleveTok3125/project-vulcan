@@ -4,12 +4,13 @@
 #   udevadm control --reload-rules
 #   udevadm trigger --subsystem-match=input
 #
-# The uinput/uhid nodes are shared with the container through Docker. The
-# container user must be a member of the numeric GID of the "uinput" group.
+# The uinput/uhid nodes are shared with the container through Docker.
+# They are normally owned by the host "input" group. The container user must
+# be a member of the numeric GID of that group.
 # Keyboard and mouse devices created by inputtino are moved to a separate seat
 # so the host compositor does not react to streamed input.
 
-KERNEL=="uinput", GROUP="uinput", MODE="0660"
-KERNEL=="uhid", GROUP="uinput", MODE="0660"
+KERNEL=="uinput", GROUP="input", MODE="0660"
+KERNEL=="uhid", GROUP="input", MODE="0660"
 
 SUBSYSTEM=="input", ATTRS{name}=="*passthrough*", ENV{ID_SEAT}="seat-vulcan", MODE="0660", GROUP="input"

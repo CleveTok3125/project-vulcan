@@ -44,14 +44,9 @@ services:
     security_opt:
       - no-new-privileges:true
 
-    # Numeric host GIDs. Set them in .env, for example:
-    #   GID_INPUT=$(getent group input | cut -d: -f3)
-    group_add:
-      - "${GID_INPUT:?set GID_INPUT in .env}"
-      - "${GID_RENDER:?set GID_RENDER in .env}"
-      - "${GID_VIDEO:?set GID_VIDEO in .env}"
-      - "${GID_UINPUT:?set GID_UINPUT in .env}"
-
+    # Numeric host GIDs are passed as environment variables and applied to
+    # the game process by the entrypoint. They are not added with group_add,
+    # because input and uinput often share the same host GID.
     volumes:
       - "${GAME_DIR:-/srv/games/zzz}:/games-ro/zzz:ro"
       - "zzz-data:/data"

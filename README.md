@@ -41,8 +41,7 @@ client and owns the game session inside the container.
 ### Groups and udev
 
 ```bash
-sudo groupadd -f uinput
-sudo usermod -aG input,render,video,uinput "$USER"
+sudo usermod -aG input,render,video "$USER"
 sudo install -m 0644 host/99-vulcan-input.rules /etc/udev/rules.d/99-vulcan-input.rules
 sudo udevadm control --reload-rules
 sudo udevadm trigger --subsystem-match=input
@@ -50,17 +49,27 @@ sudo udevadm trigger --subsystem-match=input
 
 Log out and back in after changing groups.
 
-Get numeric GIDs for `.env`:
+Get numeric GIDs for the local environment file:
 
 ```bash
-getent group input render video uinput
+getent group input render video
+stat -c '%g' /dev/uinput
 ```
+
+`GID_UINPUT` is the group that owns `/dev/uinput`, usually the same as
+`GID_INPUT`.
 
 ## Configuration
 
 ```bash
-cp .env.example .env
-$EDITOR .env
+cp .env.example .env.local
+$EDITOR .env.local
+```
+
+The local file is ignored by git. Use it explicitly:
+
+```bash
+docker compose --env-file .env.local -f compose.yaml -f compose.nvidia.yaml up -d
 ```
 
 Example:
@@ -70,7 +79,7 @@ GAME_DIR=/srv/games/zzz
 GID_INPUT=993
 GID_RENDER=992
 GID_VIDEO=986
-GID_UINPUT=991
+GID_UINPUT=993
 APOLLO_ENCODER=nvenc
 APOLLO_ADAPTER=
 APOLLO_NAME=Vulcan-ZZZ
@@ -93,17 +102,17 @@ APOLLO_ADAPTER=/dev/dri/renderD128
 NVIDIA:
 
 ```bash
-docker compose -f compose.yaml -f compose.nvidia.yaml build
-docker compose -f compose.yaml -f compose.nvidia.yaml up -d
-docker compose -f compose.yaml -f compose.nvidia.yaml logs -f
+docker compose --env-file .env.local -f compose.yaml -f compose.nvidia.yaml build
+docker compose --env-file .env.local -f compose.yaml -f compose.nvidia.yaml up -d
+docker compose --env-file .env.local -f compose.yaml -f compose.nvidia.yaml logs -f
 ```
 
 AMD/Intel:
 
 ```bash
-docker compose build
-docker compose up -d
-docker compose logs -f
+docker compose --env-file .env.local build
+docker compose --env-file .env.local up -d
+docker compose --env-file .env.local logs -f
 ```
 
 The Apollo web UI is available at `https://<host>:47990` by default
@@ -117,15 +126,15 @@ userland libraries and `/dev/nvidia*` need CDI or the NVIDIA runtime. Use the
 CDI override:
 
 ```bash
-docker compose -f compose.yaml -f compose.nvidia.yaml up -d
+docker compose --env-file .env.local -f compose.yaml -f compose.nvidia.yaml up -d
 ```
 
 Do not use `--gpus all` blindly: verify inside the container that
 `/dev/dri/card0` was not mounted.
 
 ```bash
-docker compose exec game ls -l /dev/dri
-docker compose exec game ls -l /dev/nvidia*
+docker compose --env-file .env.local exec game ls -l /dev/dri
+docker compose --env-file .env.local exec game ls -l /dev/nvidia*
 ```
 
 Expected: `renderD128` and NVIDIA control/device nodes; no `card0`.
