@@ -1,0 +1,103 @@
+name: vulcan
+
+services:
+  game:
+    build:
+      context: .
+      args:
+        GPU_VENDOR: "${GPU_VENDOR:-nvidia}"
+        INSTALL_CUDA: "${INSTALL_CUDA:-1}"
+        APOLLO_PKG: "${APOLLO_PKG:-apollo}"
+    image: vulcan/game-stream:local
+    container_name: vulcan-game
+    init: true
+    network_mode: host
+    read_only: true
+    restart: unless-stopped
+    stop_grace_period: 20s
+
+    tmpfs:
+      - /tmp:size=2g
+      - /run:size=512m
+      - /var:size=1g
+
+    # Only the render node is exposed. Never add /dev/dri/card*.
+    # For NVIDIA CDI, add "nvidia.com/gpu=0" to devices instead of --gpus all
+    # when the local Docker version supports CDI devices.
+    devices:
+      - /dev/dri/renderD128
+      - /dev/uinput
+      - /dev/uhid
+
+    # Input event nodes are created on demand by the in-container broker.
+    device_cgroup_rules:
+      - "c 13:* rwm"
+
+    cap_drop:
+      - ALL
+    cap_add:
+      # Required to create event nodes for Apollo's uinput devices.
+      - MKNOD
+      # Required only when ENABLE_OVERLAY=1. Remove it if overlay is disabled.
+      - SYS_ADMIN
+
+    security_opt:
+      - no-new-privileges:true
+
+    # Numeric host GIDs. Set them in .env, for example:
+    #   GID_INPUT=$(getent group input | cut -d: -f3)
+    group_add:
+      - "${GID_INPUT:?set GID_INPUT in .env}"
+      - "${GID_RENDER:?set GID_RENDER in .env}"
+      - "${GID_VIDEO:?set GID_VIDEO in .env}"
+      - "${GID_UINPUT:?set GID_UINPUT in .env}"
+
+    volumes:
+      - "${GAME_DIR:-/srv/games/zzz}:/games-ro/zzz:ro"
+      - "zzz-data:/data"
+
+    environment:
+      GAME_ID: "${GAME_ID:-zzz}"
+      GAME_WIDTH: "${GAME_WIDTH:-1920}"
+      GAME_HEIGHT: "${GAME_HEIGHT:-1080}"
+      GAME_FPS: "${GAME_FPS:-144}"
+      GAME_EXE: "${GAME_EXE:-/games/zzz/ZenlessZoneZero.exe}"
+      GAMESCOPE_ENABLED: "${GAMESCOPE_ENABLED:-1}"
+      GAMESCOPE_RT: "${GAMESCOPE_RT:-0}"
+      GAMESCOPE_GRAB_CURSOR: "${GAMESCOPE_GRAB_CURSOR:-0}"
+      GAMESCOPE_FORCE_WINDOWS_FULLSCREEN: "${GAMESCOPE_FORCE_WINDOWS_FULLSCREEN:-1}"
+      INPUT_BROKER: "${INPUT_BROKER:-1}"
+      INPUT_EXTRA_NAMES: "${INPUT_EXTRA_NAMES:-}"
+      ENABLE_OVERLAY: "${ENABLE_OVERLAY:-1}"
+
+      AQ_NO_KMS_REQUIREMENT: "1"
+      AQ_DRM_DEVICES: "${RENDER_NODE:-/dev/dri/renderD128}"
+      RENDER_NODE: "${RENDER_NODE:-/dev/dri/renderD128}"
+      APOLLO_ENCODER: "${APOLLO_ENCODER:-nvenc}"
+      APOLLO_ADAPTER: "${APOLLO_ADAPTER:-}"
+      APOLLO_NAME: "${APOLLO_NAME:-Vulcan-ZZZ}"
+      APOLLO_PORT: "${APOLLO_PORT:-47989}"
+
+      PROTONPATH: "${PROTONPATH:-/data/spritz-wine-tkg}"
+      UMU_RUNTIME_UPDATE: "${UMU_RUNTIME_UPDATE:-0}"
+      UMU_LOG: "${UMU_LOG:-1}"
+      GAMEID: "${GAMEID:-umu-zzz}"
+
+      # NVIDIA Container Toolkit options. Ignored by an AMD image.
+      NVIDIA_VISIBLE_DEVICES: "${NVIDIA_VISIBLE_DEVICES:-0}"
+      NVIDIA_DRIVER_CAPABILITIES: "all"
+
+      GID_INPUT: "${GID_INPUT:?set GID_INPUT in .env}"
+      GID_RENDER: "${GID_RENDER:?set GID_RENDER in .env}"
+      GID_VIDEO: "${GID_VIDEO:?set GID_VIDEO in .env}"
+      GID_UINPUT: "${GID_UINPUT:?set GID_UINPUT in .env}"
+
+    shm_size: "2gb"
+
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+
+volumes:
+  zzz-data:

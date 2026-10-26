@@ -1,0 +1,49 @@
+-- Vulcan headless compositor.
+-- This file targets the Lua configuration format used by current Hyprland.
+
+hl.env("AQ_NO_KMS_REQUIREMENT", "1")
+hl.env("AQ_DRM_DEVICES", "@RENDER_NODE@")
+hl.env("HYPRLAND_NO_SD_VARS", "1")
+hl.env("HYPRLAND_NO_SD_NOTIFY", "1")
+hl.env("HYPRLAND_NO_RT", "1")
+
+hl.config({
+    general = {
+        border_size = 0,
+        gaps_in = 0,
+        gaps_out = 0,
+        layout = "monocle",
+    },
+    decoration = {
+        rounding = 0,
+        shadow = { enabled = false },
+        blur = { enabled = false },
+    },
+    animations = { enabled = false },
+    cursor = { no_hardware_cursors = 1 },
+    misc = {
+        disable_hyprland_logo = true,
+        disable_splash_rendering = true,
+        force_default_wallpaper = 0,
+    },
+    xwayland = { force_zero_scaling = true },
+})
+
+hl.monitor({
+    output = "HEADLESS-0",
+    mode = "@GAME_WIDTH@x@GAME_HEIGHT@@GAME_FPS@",
+    position = "0x0",
+    scale = 1,
+})
+
+-- gamescope is the only visible client. The rule is a fallback for games
+-- that do not request fullscreen themselves.
+hl.window_rule({
+    match = { class = "^(gamescope)$" },
+    fullscreen = true,
+    monitor = "HEADLESS-0",
+})
+
+hl.on("hyprland.start", function()
+    hl.exec_cmd("/usr/local/bin/session-start.sh")
+end)

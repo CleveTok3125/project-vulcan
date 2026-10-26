@@ -1,0 +1,25 @@
+{
+    "apps": [
+        {
+            "allow-client-commands": true,
+            "auto-detach": false,
+            "cmd": "/usr/local/bin/launch-zzz.sh",
+            "elevated": false,
+            "exclude-global-prep-cmd": false,
+            "exclude-global-state-cmd": false,
+            "exit-timeout": 5,
+            "gamepad": "",
+            "image-path": "desktop.png",
+            "name": "Zenless Zone Zero",
+            "output": "",
+            "per-client-app-identity": false,
+            "scale-factor": 100,
+            "state-cmd": [],
+            "terminate-on-pause": false,
+            "use-app-identity": false,
+            "uuid": "A1C0F5D0-7B3A-4E0B-9F17-2C7F2A7E9B11",
+            "virtual-display": false,
+            "wait-all": true
+        }
+    ]
+}

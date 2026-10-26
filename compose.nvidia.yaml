@@ -1,0 +1,8 @@
+services:
+  game:
+    # CDI device. Requires a Docker version with CDI support and an NVIDIA
+    # Container Toolkit CDI spec. If the local Docker version does not support
+    # CDI, use the NVIDIA container runtime instead, then verify that
+    # /dev/dri/card0 was not mounted.
+    devices:
+      - nvidia.com/gpu=0

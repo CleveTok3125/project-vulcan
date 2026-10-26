@@ -1,0 +1,5 @@
+.note.ai/
+.trash/
+.env
+data/
+*.log

@@ -1,0 +1,7 @@
+.git
+.note.ai
+.trash
+.env
+data
+*.log
+artifacts

@@ -1,0 +1,18 @@
+sunshine_name = @NAME@
+port = @PORT@
+origin_web_ui_allowed = lan
+address_family = both
+
+capture = wlr
+output_name = HEADLESS-0
+encoder = @ENCODER@
+adapter_name = @ADAPTER@
+
+file_apps = /config/apollo/apps.json
+file_state = /data/apollo/sunshine_state.json
+log_path = /data/apollo/sunshine.log
+pkey = /data/apollo/credentials/cakey.pem
+cert = /data/apollo/credentials/cacert.pem
+
+lan_encryption_mode = 1
+min_log_level = 2
