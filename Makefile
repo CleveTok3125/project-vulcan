@@ -6,7 +6,7 @@ VOLUME := vulcan_zzz-data
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build up rebuild stop down restart logs ps config clean reset
+.PHONY: help build up rebuild stop down restart logs ps config clean reset stats usage
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -34,6 +34,12 @@ logs: ## Follow container logs
 
 ps: ## Show container status
 	$(COMPOSE) ps
+
+stats: ## Show container CPU, memory, and GPU usage
+	@docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}' $(CONTAINER)
+	@docker exec $(CONTAINER) nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits | awk -F', ' '{printf "GPU: %s%%  VRAM: %s/%s MiB  Temp: %s C\n", $$1, $$2, $$3, $$4}'
+
+usage: stats ## Alias for stats
 
 config: ## Validate and print the resolved compose config
 	$(COMPOSE) config
