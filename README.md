@@ -61,11 +61,14 @@ packages once. Do not use `--no-cache` for normal rebuilds.
 
 The build pins its external inputs:
 
-- `ARCH_SNAPSHOT` selects the Arch Linux archive snapshot for both stages.
+- The CachyOS base image is pinned by digest.
 - `APOLLO_PKG` and `APOLLO_COMMIT` pin the AUR package source to an exact
   Apollo commit.
-- The base image is pinned by digest.
 - Rust crates are pinned by `rust/Cargo.lock` and built with `--locked`.
+
+CachyOS repositories do not expose an archive snapshot, so packages are
+resolved from the CachyOS repos at build time. The pinned base digest is the
+strongest available pin for those packages.
 
 Update these together when intentionally upgrading the image.
 
@@ -92,7 +95,6 @@ GID_RENDER=992
 GID_VIDEO=986
 APOLLO_PKG=apollo-git
 APOLLO_COMMIT=adc5c5a0bd80831ce495434bb16aee2cd4175fb8
-ARCH_SNAPSHOT=2026/10/26
 APOLLO_ENCODER=nvenc
 APOLLO_ADAPTER=
 APOLLO_NAME=Vulcan-ZZZ

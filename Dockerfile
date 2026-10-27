@@ -2,26 +2,20 @@
 
 # Arch is used because Sway and gamescope are current there.
 # Pin the base image digest before publishing a reproducible build.
-FROM archlinux:base@sha256:52dfbd5afb23a220d5ee92dafcb4c788d96c026ed04179890c23adef4c897fa0 AS rust-builder
-ARG ARCH_SNAPSHOT=2026/10/26
-RUN printf 'Server = https://archive.archlinux.org/repos/%s/$repo/os/$arch\n' "$ARCH_SNAPSHOT" \
-        > /etc/pacman.d/mirrorlist \
-    && pacman -Syu --noconfirm --needed --disable-download-timeout rust gcc libei
+FROM cachyos/cachyos-v3@sha256:91d3b3f4db6016ca308765122d4c02049c39068ae37c509365047fa2c02d9af5 AS rust-builder
+RUN pacman -Syu --noconfirm --needed --disable-download-timeout rust gcc libei
 COPY rust /build
 WORKDIR /build
 RUN cargo build --release --locked
 
-FROM archlinux:base@sha256:52dfbd5afb23a220d5ee92dafcb4c788d96c026ed04179890c23adef4c897fa0
+FROM cachyos/cachyos-v3@sha256:91d3b3f4db6016ca308765122d4c02049c39068ae37c509365047fa2c02d9af5
 
-ARG ARCH_SNAPSHOT=2026/10/26
 ARG GPU_VENDOR=nvidia
 ARG INSTALL_CUDA=1
 ARG APOLLO_PKG=apollo-git
 ARG APOLLO_COMMIT=adc5c5a0bd80831ce495434bb16aee2cd4175fb8
 
-RUN printf 'Server = https://archive.archlinux.org/repos/%s/$repo/os/$arch\n' "$ARCH_SNAPSHOT" \
-        > /etc/pacman.d/mirrorlist \
-    && pacman -Syu --noconfirm --needed --disable-download-timeout \
+RUN pacman -Syu --noconfirm --needed --disable-download-timeout \
         base-devel \
         git \
         sudo \
