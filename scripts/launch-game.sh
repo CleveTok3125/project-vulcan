@@ -45,11 +45,27 @@ fi
 
 cd "$(dirname "$GAME_EXE")"
 
+runner=()
+if [ -x "$WINE_ROOT/bin/wine64" ]; then
+    runner=("$WINE_ROOT/bin/wine64" "$GAME_EXE")
+else
+    printf '[vulcan] wine64 not found under WINE_ROOT: %s\n' "$WINE_ROOT" >&2
+    exit 1
+fi
+
+# The prefix lives in the container volume. A fresh volume starts empty, so
+# create the default Wine prefix here instead of shipping one in the image.
+if [ ! -d "$WINEPREFIX/drive_c/windows/system32" ]; then
+    printf '[vulcan] initializing Wine prefix: %s\n' "$WINEPREFIX" >&2
+    WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml=" \
+        "$WINE_ROOT/bin/wine64" wineboot --init \
+        || {
+            printf '[vulcan] Wine prefix initialization failed: %s\n' "$WINEPREFIX" >&2
+            exit 1
+        }
+fi
+
 if [ "$D3D_BACKEND" = "dxvk" ]; then
-    if [ ! -d "$WINEPREFIX/drive_c/windows/system32" ]; then
-        printf '[vulcan] Wine prefix not initialized: %s\n' "$WINEPREFIX" >&2
-        exit 1
-    fi
     for dll in d3d11.dll dxgi.dll; do
         src="$DXVK_DIR/x64/$dll"
         if [ ! -f "$src" ]; then
@@ -67,14 +83,6 @@ if [ -f "$XINPUT_DLL" ]; then
     done
 else
     printf '[vulcan] XInput proxy not found: %s; gamepad disabled\n' "$XINPUT_DLL" >&2
-fi
-
-runner=()
-if [ -x "$WINE_ROOT/bin/wine64" ]; then
-    runner=("$WINE_ROOT/bin/wine64" "$GAME_EXE")
-else
-    printf '[vulcan] wine64 not found under WINE_ROOT: %s\n' "$WINE_ROOT" >&2
-    exit 1
 fi
 
 if [ "$GAMESCOPE_ENABLED" = "1" ]; then
