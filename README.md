@@ -229,16 +229,25 @@ read-write mount. Do not expose a read-write game directory while streaming.
 
 `INPUT_TRANSPORT=socket` is the only supported path. Apollo's libevdev
 uinput calls are intercepted by a Rust shim and sent over a Unix socket to
-`vulcan-inputd`. The daemon forwards pointer and keyboard events to
-gamescope's libei/EIS socket. No host uinput device and no host udev rule are
-used.
+`vulcan-inputd`. No host uinput device and no host udev rule are used.
 
-Socket transport path:
+Pointer and keyboard path:
 
 ```text
 Apollo -> libvulcan_uinput_shim.so -> /run/user/1000/vulcan-input.sock
        -> vulcan-inputd -> gamescope EIS -> Xwayland -> Wine
 ```
+
+`vulcan-inputd` starts emulating as soon as gamescope creates the EIS device
+and reads `device.resumed` before it sends input; libei rejects events for a
+device that is not emulating.
+
+Cursor: gamescope runs nested under Sway and cannot hand a client cursor to the
+host reliably, so the image starts it with `--force-grab-cursor` and a long
+`--hide-cursor-delay`. gamescope then paints the game's cursor into its own
+frames and Apollo captures it with the rest of the image. `GAMESCOPE_GRAB_CURSOR=0`
+restores host-side cursor handling, which leaves the stream without a cursor
+while the pointer is over gamescope.
 
 Gamepad path:
 
@@ -252,14 +261,15 @@ The shim fakes the gamepad and `vulcan-inputd` writes the pad state to
 native XInput DLL and sets `WINEDLLOVERRIDES`. Set `INPUT_GAMEPAD=0` to
 disable the gamepad.
 
-The input broker exposes the pointer, keyboard, touch, and pen passthrough
-nodes to Sway's libinput inside the container. Sway preloads
-`/usr/lib/libvulcan-input-grab.so`; the library calls `EVIOCGRAB` on each
-event node so only Sway receives it. No host udev rule is installed.
+The input broker mirrors Apollo's remaining uinput nodes into the container's
+private `/dev/input` and emits udev events so libinput can hotplug them. Sway
+preloads `/usr/lib/libvulcan-input-grab.so`; the library calls `EVIOCGRAB` on
+each event node so only Sway receives it. No host udev rule is installed.
 
 Sway runs with `WLR_BACKENDS=headless,libinput` and libseat's `noop` backend.
-`GAMESCOPE_TOUCH_MODE` controls gamescope's touch handling. The Sway cursor is
-blended into Apollo's wlr capture while `display_cursor` is enabled.
+`GAMESCOPE_TOUCH_MODE` controls gamescope's touch handling. Pointer and keyboard
+input reaches the game through gamescope, so Sway itself has no pointer device
+and does not draw the streamed cursor.
 
 `INPUT_BACKEND=xtest` falls back to `input-bridge.py`, which grabs the event
 nodes with `EVIOCGRAB` and injects them into gamescope's Xwayland display with
