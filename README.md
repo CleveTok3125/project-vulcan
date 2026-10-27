@@ -192,6 +192,28 @@ Defaults:
 - Game executable: `/games/zzz/ZenlessZoneZero.exe`.
 - Wine: `/data/spritz-wine-tkg/bin/wine64`, with `UMU_USE_STEAM=1`.
 
+### GPU path
+
+The container receives only the render node named by `RENDER_NODE` plus the
+NVIDIA device nodes from `compose.nvidia.yaml`; a host iGPU is not passed
+through. Keep `RENDER_NODE` on the GPU that runs gamescope and the encoder.
+
+Every streamed frame goes through two composition steps:
+
+1. gamescope composites the game into its own output.
+2. Sway imports that output as a dmabuf, composites the cursor, and renders the
+   headless output that Apollo captures.
+
+The second step adds one full-screen read and write per frame: about 1.2 GB/s
+in each direction at 1920x1080@144, a few percent of a discrete GPU's memory
+bandwidth. It runs on the GPU, not the CPU, as long as Sway uses its GLES
+renderer.
+
+Keeping every step on one GPU matters more than the extra pass. Pointing
+`RENDER_NODE` at a second GPU moves Sway's composite onto that GPU, forces a
+cross-GPU dmabuf import for every frame, and drops Apollo out of the zero-copy
+VRAM capture path into a GPU -> RAM -> GPU transfer.
+
 Change resolution or FPS in `.env.local`:
 
 - `GAME_WIDTH`, `GAME_HEIGHT`, `GAME_FPS`
@@ -208,6 +230,11 @@ GAMESCOPE_ENABLED=0
 
 This is an A/B choice. Measure frame pacing and input latency with and without
 gamescope.
+
+The socket input transport requires gamescope: `vulcan-inputd` delivers input
+through gamescope's EIS socket and gamescope composites the streamed cursor.
+With `GAMESCOPE_ENABLED=0` the game renders directly under Sway, but the
+container then has neither pointer/keyboard input nor a streamed cursor.
 
 ## Read-only game directory
 
