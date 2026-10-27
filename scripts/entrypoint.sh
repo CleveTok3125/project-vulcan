@@ -29,9 +29,12 @@ export XDG_DATA_HOME="/data/home/.local/share"
 export HOME="/data/home"
 
 install -d -m 0755 /data
-install -d -m 0755 -o "$GAME_UID" -g "$GAME_GID" \
+# Ownership is applied after the directories exist. `install -o` chowns before
+# it chmods, which needs CAP_FOWNER; the container does not keep that
+# capability.
+install -d -m 0755 \
     /data/apollo /data/apollo/credentials /data/home /data/log /data/prefix /data/overlay
-install -d -m 0700 -o "$GAME_UID" -g "$GAME_GID" "$XDG_RUNTIME_DIR"
+install -d -m 0700 "$XDG_RUNTIME_DIR"
 install -d -m 0755 /dev/input /run/udev /run/udev/data /run/udev/rules.d
 install -d -m 0755 "$GAME_PATH"
 if [ ! -e /var/run ] && [ ! -L /var/run ]; then
@@ -40,7 +43,7 @@ fi
 if [ ! -e /run/udev/control ]; then
     touch /run/udev/control
 fi
-chown "$GAME_UID:$GAME_GID" /data
+chown "$GAME_UID:$GAME_GID" /data "$XDG_RUNTIME_DIR"
 chown -R "$GAME_UID:$GAME_GID" /data/apollo /data/home /data/log /data/prefix /data/overlay
 
 cleanup() {
