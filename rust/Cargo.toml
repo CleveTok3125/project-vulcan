@@ -1,0 +1,13 @@
+[workspace]
+members = ["proto", "shim", "inputd"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "AGPL-3.0-or-later"
+
+[profile.release]
+panic = "abort"
+lto = true
+strip = true

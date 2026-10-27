@@ -22,10 +22,25 @@ install -d -m 0755 /data
 install -d -m 0755 -o "$GAME_UID" -g "$GAME_GID" \
     /data/apollo /data/apollo/credentials /data/home /data/log /data/prefix /data/overlay
 install -d -m 0700 -o "$GAME_UID" -g "$GAME_GID" "$XDG_RUNTIME_DIR"
-install -d -m 0755 /dev/input /run/udev /run/udev/data
-touch /run/udev/control
+install -d -m 0755 /dev/input /run/udev /run/udev/data /run/udev/rules.d
+if [ ! -e /var/run ] && [ ! -L /var/run ]; then
+    ln -s /run /var/run
+fi
+if [ ! -e /run/udev/control ]; then
+    touch /run/udev/control
+fi
 chown "$GAME_UID:$GAME_GID" /data
 chown -R "$GAME_UID:$GAME_GID" /data/apollo /data/home /data/log /data/prefix /data/overlay
+
+cleanup() {
+    kill $(jobs -p) 2>/dev/null || true
+}
+
+trap cleanup EXIT INT TERM
+INPUT_TRANSPORT="${INPUT_TRANSPORT:-socket}"
+if [ "$INPUT_TRANSPORT" != "socket" ]; then
+    die "only INPUT_TRANSPORT=socket is supported"
+fi
 
 if [ "${ENABLE_OVERLAY:-1}" = "1" ]; then
     if [ ! -d /games-ro/zzz ]; then
@@ -47,25 +62,35 @@ read_gid() {
     stat -c '%g' "$1" 2>/dev/null || printf '0\n'
 }
 
-GID_INPUT="${GID_INPUT:-$(read_gid /dev/uinput)}"
+GID_INPUT="${GID_INPUT:-$(read_gid /dev/input)}"
 GID_RENDER="${GID_RENDER:-$(read_gid /dev/dri/renderD128)}"
 GID_VIDEO="${GID_VIDEO:-$(read_gid /dev/dri/renderD128)}"
-GID_UINPUT="${GID_UINPUT:-$(read_gid /dev/uinput)}"
 GID_STORAGE="${GID_STORAGE:-$(read_gid /dev/dri/card0)}"
 GID_SEAT="$(getent group seat | cut -d: -f3 || true)"
 
 GROUP_LIST="$(
-    printf '%s\n' "$GID_INPUT" "$GID_RENDER" "$GID_VIDEO" "$GID_UINPUT" "$GID_STORAGE" "$GID_SEAT" \
+    printf '%s\n' "$GID_INPUT" "$GID_RENDER" "$GID_VIDEO" "$GID_STORAGE" "$GID_SEAT" \
         | awk '/^[0-9]+$/ && $1 != 0' \
         | sort -nu \
         | paste -sd, -
 )"
 
+SETPRIV_CMD=()
+if [ -n "$GROUP_LIST" ]; then
+    SETPRIV_CMD=(setpriv --reuid="$GAME_UID" --regid="$GAME_GID" --groups "$GROUP_LIST" --)
+else
+    SETPRIV_CMD=(setpriv --reuid="$GAME_UID" --regid="$GAME_GID" --clear-groups --)
+fi
+
 as_game() {
-    if [ -n "$GROUP_LIST" ]; then
-        setpriv --reuid="$GAME_UID" --regid="$GAME_GID" --groups "$GROUP_LIST" -- "$@"
+    "${SETPRIV_CMD[@]}" "$@"
+}
+
+as_game_netns() {
+    if [ -n "$INPUT_NETNS" ]; then
+        ip netns exec "$INPUT_NETNS" "${SETPRIV_CMD[@]}" "$@"
     else
-        setpriv --reuid="$GAME_UID" --regid="$GAME_GID" --clear-groups -- "$@"
+        "${SETPRIV_CMD[@]}" "$@"
     fi
 }
 
@@ -105,12 +130,51 @@ as_game env \
         pactl set-default-sink vulcan_game >/dev/null 2>&1 || true
     ' >/data/log/audio.log 2>&1 || true
 
+INPUT_BACKEND="${INPUT_BACKEND:-native}"
+case "$INPUT_BACKEND" in
+    native)
+        SWAY_BACKENDS="headless,libinput"
+        # libseat's noop backend opens /dev/input with the game user's
+        # permissions. No seatd or logind is available in the container.
+        # The preload grabs each event node opened by libinput so the host
+        # compositor cannot consume the same stream input.
+        SWAY_INPUT_ENV=(
+            LIBSEAT_BACKEND=noop
+            WLR_LIBINPUT_NO_DEVICES=1
+            LD_PRELOAD=/usr/lib/libvulcan-input-grab.so
+        )
+        ;;
+    xtest)
+        SWAY_BACKENDS="headless"
+        SWAY_INPUT_ENV=()
+        ;;
+    *)
+        die "unsupported INPUT_BACKEND: $INPUT_BACKEND"
+        ;;
+esac
+
+INPUT_NETNS=""
+if [ "${INPUT_NETNS_ENABLED:-1}" = "1" ]; then
+    INPUT_NETNS_NAME="${INPUT_NETNS_NAME:-vulcan-input}"
+    ip netns del "$INPUT_NETNS_NAME" 2>/dev/null || true
+    if ip netns add "$INPUT_NETNS_NAME" 2>/dev/null; then
+        INPUT_NETNS="$INPUT_NETNS_NAME"
+        log "broker and Sway run in netns ${INPUT_NETNS}"
+    else
+        log "failed to create input netns; broker udev events reach the host"
+    fi
+fi
+
 if [ "${INPUT_BROKER:-1}" = "1" ]; then
-    INPUT_GID="$GID_INPUT" python3 /usr/local/bin/input-broker.py \
+    broker_cmd=(python3 /usr/local/bin/input-broker.py)
+    if [ -n "$INPUT_NETNS" ]; then
+        broker_cmd=(ip netns exec "$INPUT_NETNS" "${broker_cmd[@]}")
+    fi
+    INPUT_GID="$GID_INPUT" "${broker_cmd[@]}" \
         >/data/log/input-broker.log 2>&1 &
 fi
 
-if [ "${INPUT_BRIDGE:-1}" = "1" ]; then
+if [ "$INPUT_BACKEND" = "xtest" ]; then
     INPUT_DISPLAY="${INPUT_DISPLAY:-}"
     if [ -z "$INPUT_DISPLAY" ]; then
         if [ "${GAMESCOPE_ENABLED:-1}" = "1" ]; then
@@ -164,21 +228,37 @@ fi
 
 chown "$GAME_UID:$GAME_GID" /data/apollo/sunshine.conf /data/sway/config
 
-log "starting Sway"
-as_game env \
+log "starting Sway with ${SWAY_BACKENDS} (input: ${INPUT_BACKEND})"
+as_game_netns env \
+    "${SWAY_INPUT_ENV[@]}" \
     DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
     XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
     PULSE_SERVER="$PULSE_SERVER" \
     XDG_SESSION_TYPE=wayland \
     XDG_CURRENT_DESKTOP=sway \
-    WLR_BACKENDS=headless \
+    XCURSOR_THEME=Adwaita \
+    XCURSOR_SIZE=24 \
+    WLR_BACKENDS="$SWAY_BACKENDS" \
     WLR_RENDER_DRM_DEVICE="$RENDER_NODE" \
     WLR_RENDERER_ALLOW_SOFTWARE=1 \
     sway -c /data/sway/config \
     >/data/log/sway.log 2>&1 &
 
 SWAY_PID=$!
-trap 'kill $(jobs -p) 2>/dev/null || true' EXIT INT TERM
+
+# Apollo joins the host network namespace while Sway and the broker stay in
+# the private one. Wayland and X11 sockets are filesystem objects, so the
+# split does not affect capture or the game.
+as_game env \
+    DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
+    XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
+    PULSE_SERVER="$PULSE_SERVER" \
+    XDG_SESSION_TYPE=wayland \
+    XDG_CURRENT_DESKTOP=sway \
+    XCURSOR_THEME=Adwaita \
+    XCURSOR_SIZE=24 \
+    /usr/local/bin/session-start.sh \
+    >>/data/log/sway.log 2>&1 &
 
 log "Sway pid ${SWAY_PID}"
 wait "$SWAY_PID" || true

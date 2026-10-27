@@ -1,6 +1,10 @@
 #!/bin/bash
 set -Eeuo pipefail
 
+# Only sway needs the input-grab preload. Socket input uses a separate shim
+# loaded into Apollo only.
+INPUT_TRANSPORT="${INPUT_TRANSPORT:-socket}"
+
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/1000}"
 export PULSE_SERVER="${PULSE_SERVER:-unix:${XDG_RUNTIME_DIR}/pulse/native}"
 
@@ -40,6 +44,17 @@ fi
 
 export WAYLAND_DISPLAY="$(basename "$wayland_socket")"
 unset DISPLAY
+
+if [ "$INPUT_TRANSPORT" = "socket" ]; then
+    export VULCAN_INPUT_SOCKET="${VULCAN_INPUT_SOCKET:-${XDG_RUNTIME_DIR}/vulcan-input.sock}"
+    if [ "${INPUT_GAMEPAD:-1}" = "1" ]; then
+        export VULCAN_GAMEPAD_STATE="${VULCAN_GAMEPAD_STATE:-/data/prefix/drive_c/vulcan-gamepad.bin}"
+    fi
+    unset LD_PRELOAD
+    /usr/local/bin/vulcan-inputd >>/data/log/vulcan-inputd.log 2>&1 &
+    export LD_PRELOAD=/usr/lib/libvulcan_uinput_shim.so
+    printf '[vulcan] socket input on %s\n' "$VULCAN_INPUT_SOCKET"
+fi
 
 printf '[vulcan] starting Apollo on %s (%s)\n' "$WAYLAND_DISPLAY" "$SWAYSOCK"
 exec apollo /data/apollo/sunshine.conf

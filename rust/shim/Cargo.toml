@@ -1,0 +1,12 @@
+[package]
+name = "vulcan-uinput-shim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+libc = "0.2"
+vulcan-input-proto = { path = "../proto" }

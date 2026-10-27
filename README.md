@@ -16,7 +16,7 @@ Docker (rootful)
    │  └─ wine64 + game
    ├─ Apollo (capture=wlr, NVENC)
    ├─ PipeWire null sink
-   └─ input broker (uinput -> private /dev/input)
+   └─ input broker (event nodes -> private /dev/input)
 ```
 
 Only `/dev/dri/renderD128` is passed to the container. `/dev/dri/card*` is
@@ -34,7 +34,6 @@ which is not available in this container.
 
 - Linux host with Docker Engine, rootful mode.
 - NVIDIA driver and NVIDIA Container Toolkit, or AMD/Intel Mesa drivers.
-- Kernel modules `uinput` and `uhid`.
 - A host user with access to the Docker daemon.
 - Game files available under a host directory that can be mounted read-only.
 - Spritz-Wine-TkG or a Proton tree available on the host under `SPRITZ_DIR`;
@@ -43,26 +42,11 @@ which is not available in this container.
   launcher prefix before first launch if the game needs DXVK/Wine settings.
 - `WINE_ROOT` points at a Wine tree with `bin/wine64`.
 
-### Groups and udev
+### Groups
 
-```bash
-sudo usermod -aG input,render,video "$USER"
-sudo install -m 0644 host/99-vulcan-input.rules /etc/udev/rules.d/99-vulcan-input.rules
-sudo udevadm control --reload-rules
-sudo udevadm trigger --subsystem-match=input
-```
-
-Log out and back in after changing groups.
-
-Get numeric GIDs for the local environment file:
-
-```bash
-getent group input render video
-stat -c '%g' /dev/uinput
-```
-
-`GID_UINPUT` is the group that owns `/dev/uinput`, usually the same as
-`GID_INPUT`.
+Set `GID_INPUT` to the numeric GID of `/dev/input`. `GID_RENDER` and
+`GID_VIDEO` are the render/video GIDs. `GID_UINPUT` and host udev rules are
+no longer used.
 
 ## Build cache
 
@@ -72,6 +56,18 @@ package and Apollo build layers.
 
 The first build after a Dockerfile package-list change still downloads the new
 packages once. Do not use `--no-cache` for normal rebuilds.
+
+## Reproducible builds
+
+The build pins its external inputs:
+
+- `ARCH_SNAPSHOT` selects the Arch Linux archive snapshot for both stages.
+- `APOLLO_PKG` and `APOLLO_COMMIT` pin the AUR package source to an exact
+  Apollo commit.
+- The base image is pinned by digest.
+- Rust crates are pinned by `rust/Cargo.lock` and built with `--locked`.
+
+Update these together when intentionally upgrading the image.
 
 ## Configuration
 
@@ -94,12 +90,16 @@ SPRITZ_DIR=/path/to/spritz-wine-tkg
 GID_INPUT=993
 GID_RENDER=992
 GID_VIDEO=986
-GID_UINPUT=993
+APOLLO_PKG=apollo-git
+APOLLO_COMMIT=adc5c5a0bd80831ce495434bb16aee2cd4175fb8
+ARCH_SNAPSHOT=2026/10/26
 APOLLO_ENCODER=nvenc
 APOLLO_ADAPTER=
 APOLLO_NAME=Vulcan-ZZZ
 APOLLO_PORT=47989
 GAMESCOPE_FORCE_WINDOWS_FULLSCREEN=1
+GAMESCOPE_TOUCH_MODE=4
+INPUT_GAMEPAD=1
 RENDER_NODE=/dev/dri/renderD128
 UMU_USE_STEAM=1
 ```
@@ -225,61 +225,77 @@ read-write mount. Do not expose a read-write game directory while streaming.
 
 ## Input
 
-`input-broker.py` watches for the fixed inputtino device names:
+`INPUT_TRANSPORT=socket` is the only supported path. Apollo's libevdev
+uinput calls are intercepted by a Rust shim and sent over a Unix socket to
+`vulcan-inputd`. The daemon forwards pointer and keyboard events to
+gamescope's libei/EIS socket. No host uinput device and no host udev rule are
+used.
 
-- `Mouse passthrough`
-- `Keyboard passthrough`
-- `Touch passthrough`
-- `Pen passthrough`
+Socket transport path:
 
-It creates the corresponding event nodes in the container's private
-`/dev/input`, writes udev database records, and emits udev netlink events so
-libinput can hotplug them.
-
-The default input broker exposes Apollo virtual gamepads by name:
-`Sunshine X-Box One (virtual) pad`, `Sunshine PS5 (virtual) pad`, and
-`Sunshine Nintendo (virtual) pad`. Extra names can be added with
-`INPUT_EXTRA_NAMES`.
-
-The host udev rule moves `*passthrough*` devices to `seat-vulcan` and sets
-`LIBINPUT_IGNORE_DEVICE`, preventing the host compositor from consuming
-streamed keyboard and mouse input. The bridge additionally grabs the event
-nodes with `EVIOCGRAB`.
-
-Install and reload the rule after updating it:
-
-```bash
-sudo install -m 0644 host/99-vulcan-input.rules /etc/udev/rules.d/99-vulcan-input.rules
-sudo udevadm control --reload-rules
-sudo udevadm trigger --subsystem-match=input
+```text
+Apollo -> libvulcan_uinput_shim.so -> /run/user/1000/vulcan-input.sock
+       -> vulcan-inputd -> gamescope EIS -> Xwayland -> Wine
 ```
 
-Sway headless has no libinput seat, so `input-bridge.py` reads the keyboard,
-relative mouse, absolute mouse, and touch event nodes directly and injects
-them into the game's Xwayland display with XTest. With gamescope enabled, the
-bridge targets `:2`; without gamescope it targets Sway's Xwayland at `:1`.
-Override with `INPUT_DISPLAY`.
+Gamepad path:
 
-Absolute mouse is mapped to absolute XTest motion. Touch is mapped as a single
-pointer; multi-touch is not supported by the XTest path.
+```text
+Apollo gamepad -> shim -> vulcan-inputd -> vulcan-gamepad.bin
+              -> xinput1_4.dll (Wine prefix) -> game
+```
 
-Set `INPUT_BRIDGE=0` to disable the bridge.
+The shim fakes the gamepad and `vulcan-inputd` writes the pad state to
+`/data/prefix/drive_c/vulcan-gamepad.bin`. `launch-zzz.sh` installs the
+native XInput DLL and sets `WINEDLLOVERRIDES`. Set `INPUT_GAMEPAD=0` to
+disable the gamepad.
 
-Virtual gamepads are exposed as evdev nodes and are read directly by the game.
+The input broker exposes the pointer, keyboard, touch, and pen passthrough
+nodes to Sway's libinput inside the container. Sway preloads
+`/usr/lib/libvulcan-input-grab.so`; the library calls `EVIOCGRAB` on each
+event node so only Sway receives it. No host udev rule is installed.
+
+Sway runs with `WLR_BACKENDS=headless,libinput` and libseat's `noop` backend.
+`GAMESCOPE_TOUCH_MODE` controls gamescope's touch handling. The Sway cursor is
+blended into Apollo's wlr capture while `display_cursor` is enabled.
+
+`INPUT_BACKEND=xtest` falls back to `input-bridge.py`, which grabs the event
+nodes with `EVIOCGRAB` and injects them into gamescope's Xwayland display with
+XTest. With gamescope enabled the bridge targets `:2`; without gamescope it
+targets Sway's Xwayland at `:1`. Override with `INPUT_DISPLAY`. That path
+supports one pointer only and provides no Sway cursor.
+
+Logs:
+
+```bash
+docker compose exec game tail -f /data/log/sway.log
+docker compose exec game tail -f /data/log/vulcan-inputd.log
+```
+
+### Input broker
+
+`input-broker.py` watches for the fixed inputtino device names and creates
+the corresponding event nodes in the container's private `/dev/input`. It
+writes udev database records and emits udev netlink events so libinput can
+hotplug them.
+
+Virtual gamepads are not exposed as host devices; they are handled by the
+XInput proxy described above.
 
 ### Known input limitation
 
-The broker publishes uinput devices into the container network namespace. With
-`network_mode: host`, udev netlink events are shared with the host. If the host
-libinput reacts to the broker events, switch the container to a private
-network namespace (bridge or macvlan) and publish Apollo ports explicitly, or
-run the input broker on a trusted host service.
+The broker publishes event nodes into the container network namespace. With
+`network_mode: host`, udev netlink events are shared with the host. If the
+host libinput reacts to those events, use the broker's private udev database
+or switch the container to a private network namespace.
 
 ## Security
 
-This is a rootful container with `/dev/uinput` and `CAP_MKNOD`. That is enough
-to inject input into the host kernel. Run only trusted game images, and treat
-the container as part of the host trust boundary.
+This is a rootful container with `CAP_MKNOD` and a private udev database. It
+can create input nodes inside the container; it does not receive
+`/dev/uinput` or `/dev/uhid` and does not install host udev rules. Run only
+trusted game images, and treat the container as part of the host trust
+boundary.
 
 Additional hardening:
 
@@ -289,7 +305,7 @@ Additional hardening:
 - keep `no-new-privileges:true`
 - do not pass `/dev/dri/card*`
 - do not mount the host Wayland/X11 sockets
-- separate `/dev/uinput` and `/dev/input` groups if games are untrusted
+- keep `/dev/uinput` out of the container
 
 ## Limitations
 
@@ -309,6 +325,7 @@ Additional hardening:
 ls -l /dev/dri
 ls -l /dev/input
 swaymsg -t get_outputs
+swaymsg -t get_inputs
 vulkaninfo --summary
 ffmpeg -hide_banner -encoders | grep nvenc
 ```
@@ -318,5 +335,7 @@ Expected:
 - `HEADLESS-1` at 1920x1080@144
 - no `/dev/dri/card0`
 - only expected input event nodes
+- `swaymsg -t get_inputs` lists the passthrough devices while a client is
+  connected
 - Apollo logs show `Screencasting with Wayland's protocol`
 - host session remains usable while streaming

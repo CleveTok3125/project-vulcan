@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Forward Apollo passthrough input to the game's Xwayland display.
 
-Sway runs with the headless backend, so it has no libinput seat and ignores
-the event nodes exposed by input-broker. The game itself runs under gamescope
-on a private Xwayland display, so this bridge injects evdev events through
-XTest instead of routing them through Sway.
+Fallback for INPUT_BACKEND=xtest. Sway normally runs with a libinput seat and
+routes devices itself. This bridge is only for setups where libinput cannot
+open the container's input nodes: Sway then runs headless without a seat, and
+the bridge injects core events into the Xwayland display with XTest.
 """
 
 from __future__ import annotations

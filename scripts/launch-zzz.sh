@@ -21,6 +21,8 @@ case "$D3D_BACKEND" in
         exit 1
         ;;
 esac
+export WINEDLLOVERRIDES="${WINEDLLOVERRIDES};xinput1_4,xinput1_3,xinput9_1_0=n,b"
+
 DXVK_DIR="${DXVK_DIR:-/data/dxvk}"
 
 GAME_EXE="${GAME_EXE:-/games/zzz/ZenlessZoneZero.exe}"
@@ -30,6 +32,7 @@ GAME_FPS="${GAME_FPS:-144}"
 GAMESCOPE_ENABLED="${GAMESCOPE_ENABLED:-1}"
 GAMESCOPE_RT="${GAMESCOPE_RT:-0}"
 GAMESCOPE_GRAB_CURSOR="${GAMESCOPE_GRAB_CURSOR:-0}"
+GAMESCOPE_TOUCH_MODE="${GAMESCOPE_TOUCH_MODE:-4}"
 GAMESCOPE_FORCE_WINDOWS_FULLSCREEN="${GAMESCOPE_FORCE_WINDOWS_FULLSCREEN:-1}"
 
 if [ ! -e "$GAME_EXE" ]; then
@@ -54,6 +57,15 @@ if [ "$D3D_BACKEND" = "dxvk" ]; then
     done
 fi
 
+XINPUT_DLL="${XINPUT_DLL:-/usr/lib/vulcan/xinput1_4.dll}"
+if [ -f "$XINPUT_DLL" ]; then
+    for dll in xinput1_4.dll xinput1_3.dll xinput9_1_0.dll; do
+        install -m 0644 "$XINPUT_DLL" "$WINEPREFIX/drive_c/windows/system32/$dll"
+    done
+else
+    printf '[vulcan] XInput proxy not found: %s; gamepad disabled\n' "$XINPUT_DLL" >&2
+fi
+
 runner=()
 if [ -x "$WINE_ROOT/bin/wine64" ]; then
     runner=("$WINE_ROOT/bin/wine64" "$GAME_EXE")
@@ -69,6 +81,7 @@ if [ "$GAMESCOPE_ENABLED" = "1" ]; then
         -w "$GAME_WIDTH" -h "$GAME_HEIGHT"
         -r "$GAME_FPS"
         -f
+        --default-touch-mode "$GAMESCOPE_TOUCH_MODE"
     )
 
     if [ "$GAMESCOPE_RT" = "1" ]; then

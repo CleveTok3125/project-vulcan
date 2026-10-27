@@ -17,3 +17,4 @@ cert = /data/apollo/credentials/cacert.pem
 lan_encryption_mode = 1
 system_tray = disabled
 min_log_level = 0
+gamepad = xbox
