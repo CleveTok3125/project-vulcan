@@ -91,14 +91,21 @@ RUN useradd -m -u 1001 builder \
 
 USER builder
 WORKDIR /home/builder
+# apollo-git builds its CUDA frame conversion path only when the cuda package
+# is installed. Without it nvenc initializes but the encoder test fails with
+# "Couldn't scale frame: Invalid argument" and Apollo falls back to libx264.
+# The toolkit is removed after the build; apollo-host resolves libcuda.so.1
+# from the driver at runtime.
 RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
     --mount=type=cache,target=/var/lib/pacman/sync,sharing=locked \
-    git clone --depth 1 "https://aur.archlinux.org/${APOLLO_PKG}.git" "/home/builder/${APOLLO_PKG}" \
+    sudo pacman -Sy --noconfirm --needed cuda \
+    && git clone --depth 1 "https://aur.archlinux.org/${APOLLO_PKG}.git" "/home/builder/${APOLLO_PKG}" \
     && cd "/home/builder/${APOLLO_PKG}" \
     && if [ "$APOLLO_PKG" = "apollo-git" ]; then \
          sed -i "s|^: \${_commit=}|: \${_commit=${APOLLO_COMMIT}}|" PKGBUILD; \
        fi \
-    && makepkg -si --noconfirm
+    && makepkg -si --noconfirm \
+    && sudo pacman -Rns --noconfirm cuda
 
 USER root
 WORKDIR /
