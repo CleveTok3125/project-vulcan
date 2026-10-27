@@ -38,8 +38,8 @@ which is not available in this container.
 - Game files available under a host directory that can be mounted read-only.
 - Spritz-Wine-TkG or a Proton tree available on the host under `SPRITZ_DIR`;
   it is mounted read-only at `/data/spritz-wine-tkg`.
-- A writable Wine prefix under `/data/prefix`. Seed it from an existing
-  launcher prefix before first launch if the game needs DXVK/Wine settings.
+- A writable Wine prefix under `/data/prefix`; the container creates it on
+  the first game launch.
 - `WINE_ROOT` points at a Wine tree with `bin/wine64`.
 
 ### Groups
@@ -186,34 +186,27 @@ The `make` targets pass `compose.nvidia.yaml`; on AMD/Intel hosts use the raw
    make build
    ```
 
-4. Seed the Wine prefix. With the default `D3D_BACKEND=dxvk`,
-   `launch-game.sh` refuses to start when
-   `/data/prefix/drive_c/windows/system32` is missing. Copy an existing
-   launcher prefix into the game volume; replace `<GAME_ID>` with the value
-   from `.env.local`:
-
-   ```bash
-   docker run --rm \
-     -v vulcan_<GAME_ID>-data:/data \
-     -v /path/to/existing/prefix:/src:ro \
-     --entrypoint sh \
-     vulcan/game-stream:local \
-     -c 'mkdir -p /data/prefix && cp -a /src/. /data/prefix/'
-   ```
-
-5. Start the container:
+4. Start the container:
 
    ```bash
    make up
    make logs
    ```
 
-6. Open `https://<host>:47990` (`APOLLO_PORT + 1`), accept the self-signed
+   The first launch of the game creates the Wine prefix in the volume
+   (about 340 MB). Follow it from the Apollo log:
+
+   ```bash
+   docker compose --env-file .env.local exec game \
+     tail -f /data/apollo/sunshine.log
+   ```
+
+5. Open `https://<host>:47990` (`APOLLO_PORT + 1`), accept the self-signed
    certificate, create the web credentials, and pair the first client. The
    app entry is generated at startup from `config/apollo/apps.json` and runs
    `launch-game.sh`.
 
-7. Verify the GPU nodes and the session logs:
+6. Verify the GPU nodes and the session logs:
 
    ```bash
    make stats
