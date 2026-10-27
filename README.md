@@ -336,7 +336,8 @@ and `ZenlessZoneZero_Data/SDKCaches/HoYoPass`. Because it is the lower layer, a
 fresh volume would still start signed in. `GAME_RESET_PATHS` lists
 game-relative paths to remove once per prefix; removals land in the overlay
 upper layer and the host files stay untouched. Setting it on an existing
-prefix applies at the next launch.
+prefix applies at the next launch. `make clean` removes the marker, so the
+next launch clears the state again.
 
 The overlay mount requires `CAP_SYS_ADMIN`, which is granted to the entrypoint.
 The game runs as a non-root user without that capability.
