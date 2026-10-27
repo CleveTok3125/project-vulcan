@@ -250,6 +250,16 @@ Defaults:
 The container receives only the render node named by `RENDER_NODE` plus the
 NVIDIA device nodes from `compose.nvidia.yaml`; a host iGPU is not passed
 through. Keep `RENDER_NODE` on the GPU that runs gamescope and the encoder.
+The render node numbering does not follow the card numbering, so check the
+vendor instead of taking the first node:
+
+```bash
+for f in /sys/class/drm/renderD*/device/vendor; do echo "$f $(cat "$f")"; done
+```
+
+`0x10de` is NVIDIA and `0x1002` is AMD. A node from the wrong vendor makes
+Apollo report `Couldn't initialize EGL display` and select no encoder, which
+disconnects the client right after the app starts.
 
 Every streamed frame goes through two composition steps:
 
