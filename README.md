@@ -89,6 +89,10 @@ Example:
 
 ```dotenv
 GAME_DIR=/srv/games/zzz
+GAME_ID=zzz
+GAME_APP_NAME=Zenless Zone Zero
+GAME_APP_UUID=
+GAME_EXE=/games/zzz/ZenlessZoneZero.exe
 SPRITZ_DIR=/path/to/spritz-wine-tkg
 GID_INPUT=993
 GID_RENDER=992
@@ -107,6 +111,36 @@ INPUT_GAMEPAD=1
 RENDER_NODE=/dev/dri/renderD128
 UMU_USE_STEAM=1
 ```
+
+`GAME_ID`, `GAME_DIR` and `GAME_EXE` are required. `GAME_DIR` is mounted at
+`/games-ro/<GAME_ID>`; `GAME_EXE` is the executable path inside the
+writable overlay view at `/games/<GAME_ID>`.
+
+### Game identity
+
+`GAME_ID` names everything derived from the game: the read-only mount point,
+the overlay directories, the data volume `vulcan_<GAME_ID>-data`, and the
+default Apollo host name `Vulcan-<GAME_ID>`.
+
+`GAME_APP_NAME` is the app label shown to clients. `GAME_APP_UUID` identifies
+that app entry; leave it empty to derive a stable UUID from `GAME_ID`, or set
+it explicitly, for example to keep the identity clients already stored.
+
+To run a different game, edit `.env.local` and recreate the container:
+
+```bash
+# GAME_ID=demo
+# GAME_DIR=/srv/games/demo
+# GAME_EXE=/games/demo/Demo.exe
+# GAME_APP_NAME=Demo
+make down
+make up
+```
+
+The new game gets its own volume, so its Wine prefix and overlay writes stay
+separate. Volumes of games that are no longer configured remain on the host;
+remove them with `docker volume rm`. Only one game runs at a time: the
+container name and Apollo port are fixed.
 
 For AMD:
 
@@ -136,8 +170,9 @@ docker compose --env-file .env.local logs -f
 ```
 
 The Apollo web UI is available at `https://<host>:47990` by default
-(`APOLLO_PORT + 1`). Pair the first client from the web UI. The default app
-launches Zenless Zone Zero through `launch-zzz.sh`.
+(`APOLLO_PORT + 1`). Pair the first client from the web UI. The app entry is
+generated at startup from `config/apollo/apps.json` and runs
+`launch-game.sh`.
 
 ### First run
 
@@ -189,7 +224,7 @@ Defaults:
 
 - Sway: `HEADLESS-1`, `1920x1080@144`.
 - gamescope: `--backend wayland`, fullscreen, 1920x1080@144.
-- Game executable: `/games/zzz/ZenlessZoneZero.exe`.
+- Game executable: `GAME_EXE` from `.env.local`.
 - Wine: `/data/spritz-wine-tkg/bin/wine64`, with `UMU_USE_STEAM=1`.
 
 ### GPU path
@@ -238,11 +273,11 @@ container then has neither pointer/keyboard input nor a streamed cursor.
 
 ## Read-only game directory
 
-The host directory is mounted at `/games-ro/zzz:ro`. An overlay inside the
-container presents a writable view at `/games/zzz`:
+The host directory is mounted at `/games-ro/<GAME_ID>:ro`. An overlay inside
+the container presents a writable view at `/games/<GAME_ID>`:
 
-- lower: `/games-ro/zzz`
-- upper/work: `/data/overlay/zzz`
+- lower: `/games-ro/<GAME_ID>`
+- upper/work: `/data/overlay/<GAME_ID>`
 - host files are never modified
 - game writes, `config.ini`, logs and launcher-generated files stay in the
   container volume
@@ -295,7 +330,7 @@ Apollo gamepad -> shim -> vulcan-inputd -> vulcan-gamepad.bin
 ```
 
 The shim fakes the gamepad and `vulcan-inputd` writes the pad state to
-`/data/prefix/drive_c/vulcan-gamepad.bin`. `launch-zzz.sh` installs the
+`/data/prefix/drive_c/vulcan-gamepad.bin`. `launch-game.sh` installs the
 native XInput DLL and sets `WINEDLLOVERRIDES`. Set `INPUT_GAMEPAD=0` to
 disable the gamepad.
 
