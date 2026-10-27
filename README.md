@@ -100,6 +100,8 @@ APOLLO_ADAPTER=
 APOLLO_NAME=Vulcan-ZZZ
 APOLLO_PORT=47989
 GAMESCOPE_FORCE_WINDOWS_FULLSCREEN=1
+GAMESCOPE_GRAB_CURSOR=1
+GAMESCOPE_HIDE_CURSOR_DELAY=86400000
 GAMESCOPE_TOUCH_MODE=4
 INPUT_GAMEPAD=1
 RENDER_NODE=/dev/dri/renderD128
@@ -242,14 +244,23 @@ Apollo -> libvulcan_uinput_shim.so -> /run/user/1000/vulcan-input.sock
 and reads `device.resumed` before it sends input; libei rejects events for a
 device that is not emulating.
 
-Cursor: gamescope runs nested under Sway and cannot hand a client cursor to the
-host reliably, so the image starts it with `--force-grab-cursor` and a long
-`--hide-cursor-delay`. gamescope then paints the game's cursor into its own
-frames and Apollo captures it with the rest of the image. `GAMESCOPE_GRAB_CURSOR=0`
-restores host-side cursor handling, which leaves the stream without a cursor
-while the pointer is over gamescope.
+### Cursor
 
-Gamepad path:
+The streamed cursor is the game's own cursor image, drawn by gamescope and
+captured by Apollo with the rest of the frame. gamescope runs with
+`--force-grab-cursor`, which makes it composite the cursor itself instead of
+handing it to Sway.
+
+- Visible over menus and any screen where the game provides a cursor.
+- Hidden when the game hides its cursor, such as pointer-locked gameplay.
+- No cursor outside gamescope: Sway has no pointer device here, so the desktop
+  behind the game has no cursor of its own.
+- `GAMESCOPE_GRAB_CURSOR=0` restores host-side cursor handling and drops the
+  streamed cursor over the game.
+- `GAMESCOPE_HIDE_CURSOR_DELAY` is the idle timeout in milliseconds before
+  gamescope hides the cursor; the default `86400000` keeps it visible.
+
+### Gamepad
 
 ```text
 Apollo gamepad -> shim -> vulcan-inputd -> vulcan-gamepad.bin
