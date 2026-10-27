@@ -151,52 +151,74 @@ APOLLO_ENCODER=vaapi
 APOLLO_ADAPTER=/dev/dri/renderD128
 ```
 
-## Build and run
+## Fresh deployment
 
-NVIDIA:
+These steps start from a checkout with no image, volume, or `.env.local`.
+The `make` targets pass `compose.nvidia.yaml`; on AMD/Intel hosts use the raw
+`docker compose --env-file .env.local` form without that file.
 
-```bash
-docker compose --env-file .env.local -f compose.yaml -f compose.nvidia.yaml build
-docker compose --env-file .env.local -f compose.yaml -f compose.nvidia.yaml up -d
-docker compose --env-file .env.local -f compose.yaml -f compose.nvidia.yaml logs -f
-```
+1. Read the host device group IDs:
 
-AMD/Intel:
+   ```bash
+   stat -c '%g' /dev/input /dev/dri/renderD128 /dev/dri/card0
+   ```
 
-```bash
-docker compose --env-file .env.local build
-docker compose --env-file .env.local up -d
-docker compose --env-file .env.local logs -f
-```
+   Use them for `GID_INPUT`, `GID_RENDER`, `GID_VIDEO`, and `GID_STORAGE`.
 
-The Apollo web UI is available at `https://<host>:47990` by default
-(`APOLLO_PORT + 1`). Pair the first client from the web UI. The app entry is
-generated at startup from `config/apollo/apps.json` and runs
-`launch-game.sh`.
+2. Create the local configuration:
 
-### First run
+   ```bash
+   cp .env.example .env.local
+   $EDITOR .env.local
+   make config
+   ```
 
-Build the image, then start the container:
+   `GAME_ID`, `GAME_DIR`, `GAME_EXE`, `SPRITZ_DIR`, and the GIDs are
+   required. `make config` prints the resolved compose configuration and
+   stops at a missing or malformed value.
 
-```bash
-docker compose --env-file .env.local -f compose.yaml -f compose.nvidia.yaml build
-docker compose --env-file .env.local -f compose.yaml -f compose.nvidia.yaml up -d
-docker compose --env-file .env.local -f compose.yaml -f compose.nvidia.yaml logs -f game
-```
+3. Build the image:
 
-If the Wine prefix is empty and the game needs an existing DXVK/launcher
-prefix, copy it into the container volume before the first launch:
+   ```bash
+   make build
+   ```
 
-```bash
-docker run --rm \
-  -v vulcan_zzz-data:/data \
-  -v /path/to/existing/prefix:/src:ro \
-  --entrypoint sh \
-  vulcan/game-stream:local \
-  -c 'mkdir -p /data/prefix && cp -a /src/. /data/prefix/'
-```
+4. Seed the Wine prefix. With the default `D3D_BACKEND=dxvk`,
+   `launch-game.sh` refuses to start when
+   `/data/prefix/drive_c/windows/system32` is missing. Copy an existing
+   launcher prefix into the game volume; replace `<GAME_ID>` with the value
+   from `.env.local`:
 
-Then restart the game container.
+   ```bash
+   docker run --rm \
+     -v vulcan_<GAME_ID>-data:/data \
+     -v /path/to/existing/prefix:/src:ro \
+     --entrypoint sh \
+     vulcan/game-stream:local \
+     -c 'mkdir -p /data/prefix && cp -a /src/. /data/prefix/'
+   ```
+
+5. Start the container:
+
+   ```bash
+   make up
+   make logs
+   ```
+
+6. Open `https://<host>:47990` (`APOLLO_PORT + 1`), accept the self-signed
+   certificate, create the web credentials, and pair the first client. The
+   app entry is generated at startup from `config/apollo/apps.json` and runs
+   `launch-game.sh`.
+
+7. Verify the GPU nodes and the session logs:
+
+   ```bash
+   make stats
+   docker compose --env-file .env.local exec game ls -l /dev/dri
+   docker compose --env-file .env.local exec game tail -f /data/log/sway.log
+   ```
+
+To run a different game later, see [Game identity](#game-identity).
 
 ### NVIDIA devices
 
