@@ -258,6 +258,22 @@ Defaults:
 - Game executable: `GAME_EXE` from `.env.local`.
 - Wine: `/data/spritz-wine-tkg/bin/wine64`, with `UMU_USE_STEAM=1`.
 
+### Wine environment
+
+`launch-game.sh` exports these before Wine starts; override them in
+`.env.local`:
+
+- `WINEESYNC=1` and `WINEFSYNC=1` use eventfd and futex synchronisation
+  instead of wineserver round trips. fsync requires `futex_waitv`, available
+  since Linux 5.16.
+- `XMODIFIERS=@im=none` keeps the host input method out of Wine. It is set by
+  `launch-game.sh`, not by Compose, so a desktop `XMODIFIERS` value cannot
+  leak into the container.
+- `__GL_SHADER_DISK_CACHE_SKIP_CLEANUP=1` keeps the NVIDIA GL shader cache
+  instead of letting the driver prune it.
+- `DXVK_HUD` is empty by default; set it to e.g. `fps,frametimes` to show the
+  DXVK overlay.
+
 ### GPU path
 
 The container receives only the render node named by `RENDER_NODE` plus the
