@@ -65,6 +65,26 @@ if [ ! -d "$WINEPREFIX/drive_c/windows/system32" ]; then
         }
 fi
 
+# A fresh volume mounts the host game directory as a read-only lower layer, so
+# state written there outside the container, such as stored logins, is still
+# visible. Clear the configured paths once per prefix; removals land in the
+# overlay upper layer and never touch the host files.
+reset_marker="$WINEPREFIX/.vulcan-reset-paths"
+if [ -n "${GAME_RESET_PATHS:-}" ] && [ ! -e "$reset_marker" ]; then
+    printf '[vulcan] clearing stored game state\n' >&2
+    IFS=':' read -r -a reset_paths <<<"$GAME_RESET_PATHS"
+    for reset_path in "${reset_paths[@]}"; do
+        case "$reset_path" in
+            "" | /* | *..*)
+                printf '[vulcan] ignoring unsafe reset path: %s\n' "$reset_path" >&2
+                continue
+                ;;
+        esac
+        rm -rf -- "$reset_path"
+    done
+    : >"$reset_marker"
+fi
+
 if [ "$D3D_BACKEND" = "dxvk" ]; then
     for dll in d3d11.dll dxgi.dll; do
         src="$DXVK_DIR/x64/$dll"
