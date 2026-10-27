@@ -60,6 +60,28 @@ run_launch 2>"$workdir/second.log"
 check 'second launch skips wineboot' '0' "$(grep -c '^wineboot --init$' "$wine_log")"
 check 'second launch starts game' "$game_exe" "$(tail -n 1 "$wine_log")"
 
+# Stored game state is cleared once per prefix.
+mkdir -p "$workdir/game/State/Login"
+: >"$workdir/game/State/Login/token"
+run_launch GAME_RESET_PATHS=State/Login 2>"$workdir/reset.log"
+check 'reset removes stored state' 'no' "$([ -e "$workdir/game/State/Login" ] && printf yes || printf no)"
+check 'reset writes the marker' 'yes' "$([ -e "$workdir/prefix/.vulcan-reset-paths" ] && printf yes || printf no)"
+
+mkdir -p "$workdir/game/State/Login"
+: >"$workdir/game/State/Login/token"
+run_launch GAME_RESET_PATHS=State/Login 2>"$workdir/reset-second.log"
+check 'reset runs once per prefix' 'yes' "$([ -e "$workdir/game/State/Login" ] && printf yes || printf no)"
+
+# Absolute paths and parent traversal are ignored.
+rm -f "$workdir/prefix/.vulcan-reset-paths"
+mkdir -p "$workdir/outside" "$workdir/abs"
+: >"$workdir/outside/keep"
+: >"$workdir/abs/keep"
+run_launch GAME_RESET_PATHS="../outside:$workdir/abs" 2>"$workdir/unsafe.log"
+check 'parent path kept' 'yes' "$([ -e "$workdir/outside/keep" ] && printf yes || printf no)"
+check 'absolute path kept' 'yes' "$([ -e "$workdir/abs/keep" ] && printf yes || printf no)"
+check 'unsafe paths reported' '2' "$(grep -c 'ignoring unsafe reset path' "$workdir/unsafe.log")"
+
 # A failing wineboot aborts the launch.
 rm -rf "$workdir/prefix"
 : >"$wine_log"
