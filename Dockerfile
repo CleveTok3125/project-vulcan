@@ -126,12 +126,14 @@ RUN mkdir -p /usr/lib/vulcan \
 COPY --from=rust-builder /build/target/release/libvulcan_uinput_shim.so /usr/lib/libvulcan_uinput_shim.so
 COPY --from=rust-builder /build/target/release/vulcan-inputd /usr/local/bin/vulcan-inputd
 
+# setcap -r exits non-zero when the file carries no capability. A package built
+# without file capabilities is already in the desired state.
 RUN gcc -O2 -shared -fPIC -o /usr/lib/libglycin-nosandbox.so /tmp/native/glycin-nosandbox.c -ldl \
     && gcc -O2 -shared -fPIC -o /usr/lib/libvulcan-input-grab.so /tmp/native/input-grab.c -ldl \
     && rm -rf /tmp/native \
     && chmod 0755 /usr/lib/libvulcan-input-grab.so /usr/local/bin/*.sh /usr/local/bin/input-broker.py /usr/local/bin/input-bridge.py \
     && chmod 0644 /config/sway/config.in /config/apollo/* /usr/share/vulcan/wallpaper.png \
-    && setcap -r /usr/bin/sway \
-    && setcap -r /usr/bin/btop
+    && { setcap -r /usr/bin/sway || true; } \
+    && { setcap -r /usr/bin/btop || true; }
 
 ENTRYPOINT ["/usr/bin/catatonit", "--", "/usr/local/bin/entrypoint.sh"]
