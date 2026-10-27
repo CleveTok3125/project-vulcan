@@ -26,6 +26,9 @@ wine_log="$workdir/wine.log"
 cat >"$fake_root/bin/wine64" <<'EOF'
 #!/bin/bash
 printf '%s\n' "$*" >>"$WINE_LOG"
+printf 'env:%s:%s:%s:%s:%s\n' \
+    "${WINEESYNC-}" "${WINEFSYNC-}" "${XMODIFIERS-}" \
+    "${__GL_SHADER_DISK_CACHE_SKIP_CLEANUP-}" "${DXVK_HUD-}" >>"$WINE_LOG"
 if [ "$1" = "wineboot" ]; then
     if [ "${FAKE_WINEBOOT_FAIL:-0}" = "1" ]; then
         exit 1
@@ -52,13 +55,19 @@ run_launch() {
 run_launch 2>"$workdir/first.log"
 check 'first launch initializes prefix' '1' "$(grep -c '^wineboot --init$' "$wine_log")"
 check 'prefix has system32' 'yes' "$([ -d "$workdir/prefix/drive_c/windows/system32" ] && printf yes || printf no)"
-check 'game starts after init' "$game_exe" "$(tail -n 1 "$wine_log")"
+check 'game starts after init' '1' "$(grep -cx -- "$game_exe" "$wine_log")"
+check 'wine environment defaults' 'yes' "$(grep -qx 'env:1:1:@im=none:1:' "$wine_log" && printf yes || printf no)"
 
 # Second launch reuses the prefix.
 : >"$wine_log"
 run_launch 2>"$workdir/second.log"
 check 'second launch skips wineboot' '0' "$(grep -c '^wineboot --init$' "$wine_log")"
-check 'second launch starts game' "$game_exe" "$(tail -n 1 "$wine_log")"
+check 'second launch starts game' '1' "$(grep -cx -- "$game_exe" "$wine_log")"
+
+# DXVK_HUD passes through when set.
+: >"$wine_log"
+run_launch DXVK_HUD=fps 2>"$workdir/hud.log"
+check 'dxvk hud override' 'yes' "$(grep -qx 'env:1:1:@im=none:1:fps' "$wine_log" && printf yes || printf no)"
 
 # Stored game state is cleared once per prefix.
 mkdir -p "$workdir/game/State/Login"
