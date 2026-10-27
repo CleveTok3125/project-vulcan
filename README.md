@@ -92,6 +92,7 @@ GAME_DIR=/srv/games/zzz
 GAME_ID=zzz
 GAME_APP_NAME=Zenless Zone Zero
 GAME_APP_UUID=
+GAME_RESET_PATHS=ZenlessZoneZero_Data/Persistent/LocalStorage:ZenlessZoneZero_Data/SDKCaches/HoYoPass
 GAME_EXE=/games/zzz/ZenlessZoneZero.exe
 SPRITZ_DIR=/path/to/spritz-wine-tkg
 GID_INPUT=993
@@ -262,7 +263,7 @@ Defaults:
 The container receives only the render node named by `RENDER_NODE` plus the
 NVIDIA device nodes from `compose.nvidia.yaml`; a host iGPU is not passed
 through. `RENDER_NODE` must be the render node of the GPU that runs gamescope
-and the encoder; the deployment steps show how to identify it.
+and the encoder; see [Fresh deployment](#fresh-deployment).
 
 Every streamed frame goes through two composition steps:
 
@@ -312,6 +313,14 @@ the container presents a writable view at `/games/<GAME_ID>`:
 - host files are never modified
 - game writes, `config.ini`, logs and launcher-generated files stay in the
   container volume
+
+The host directory can also contain state written outside the container,
+including stored logins under `ZenlessZoneZero_Data/Persistent/LocalStorage`
+and `ZenlessZoneZero_Data/SDKCaches/HoYoPass`. Because it is the lower layer, a
+fresh volume would still start signed in. `GAME_RESET_PATHS` lists
+game-relative paths to remove once per prefix; removals land in the overlay
+upper layer and the host files stay untouched. Setting it on an existing
+prefix applies at the next launch.
 
 The overlay mount requires `CAP_SYS_ADMIN`, which is granted to the entrypoint.
 The game runs as a non-root user without that capability.
@@ -396,7 +405,7 @@ writes udev database records and emits udev netlink events so libinput can
 hotplug them.
 
 Virtual gamepads are not exposed as host devices; they are handled by the
-XInput proxy described above.
+XInput proxy in the Wine prefix.
 
 ### Known input limitation
 
