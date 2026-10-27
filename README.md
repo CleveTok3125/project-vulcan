@@ -157,13 +157,16 @@ These steps start from a checkout with no image, volume, or `.env.local`.
 The `make` targets pass `compose.nvidia.yaml`; on AMD/Intel hosts use the raw
 `docker compose --env-file .env.local` form without that file.
 
-1. Read the host device group IDs:
+1. Read the host device group IDs. Use an input event node, not the
+   `/dev/input` directory, which belongs to root and reports `0`:
 
    ```bash
-   stat -c '%g' /dev/input /dev/dri/renderD128 /dev/dri/card0
+   stat -c '%g %n' /dev/input/event* /dev/dri/renderD128 /dev/dri/card0
    ```
 
-   Use them for `GID_INPUT`, `GID_RENDER`, `GID_VIDEO`, and `GID_STORAGE`.
+   The values are `GID_INPUT`, `GID_RENDER`, and `GID_VIDEO`/`GID_STORAGE`.
+   When the host has no event node, `getent group input` gives `GID_INPUT`.
+   A device owned by group `0` cannot be read by the game user.
 
 2. Create the local configuration:
 
