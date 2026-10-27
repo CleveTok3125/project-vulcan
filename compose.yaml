@@ -23,6 +23,8 @@ services:
       - /tmp:size=2g
       - /run:size=512m
       - /var:size=1g
+      # Overlay mount points for /games/<GAME_ID>; the root filesystem is read-only.
+      - /games:size=64m
 
     # Only the selected render node is exposed. Never add /dev/dri/card*.
     devices:
@@ -53,17 +55,19 @@ services:
     # the game process by the entrypoint. They are not added with group_add,
     # because input and uinput often share the same host GID.
     volumes:
-      - "${GAME_DIR:-/srv/games/zzz}:/games-ro/zzz:ro"
+      - "${GAME_DIR:?set GAME_DIR in .env.local}:/games-ro/${GAME_ID:?}:ro"
       - "${SPRITZ_DIR:?set SPRITZ_DIR in .env.local}:/data/spritz-wine-tkg:ro"
       - "${DXVK_HOST_DIR:-/usr/share/dxvk}:/data/dxvk:ro"
-      - "zzz-data:/data"
+      - "game-data:/data"
 
     environment:
-      GAME_ID: "${GAME_ID:-zzz}"
+      GAME_ID: "${GAME_ID:?set GAME_ID in .env.local}"
       GAME_WIDTH: "${GAME_WIDTH:-1920}"
       GAME_HEIGHT: "${GAME_HEIGHT:-1080}"
       GAME_FPS: "${GAME_FPS:-144}"
-      GAME_EXE: "${GAME_EXE:-/games/zzz/ZenlessZoneZero.exe}"
+      GAME_EXE: "${GAME_EXE:?set GAME_EXE in .env.local}"
+      GAME_APP_NAME: "${GAME_APP_NAME:-}"
+      GAME_APP_UUID: "${GAME_APP_UUID:-}"
       GAMESCOPE_ENABLED: "${GAMESCOPE_ENABLED:-1}"
       GAMESCOPE_RT: "${GAMESCOPE_RT:-0}"
       GAMESCOPE_GRAB_CURSOR: "${GAMESCOPE_GRAB_CURSOR:-1}"
@@ -82,7 +86,7 @@ services:
       APOLLO_OUTPUT: "${APOLLO_OUTPUT:-HEADLESS-1}"
       APOLLO_ENCODER: "${APOLLO_ENCODER:-nvenc}"
       APOLLO_ADAPTER: "${APOLLO_ADAPTER:-}"
-      APOLLO_NAME: "${APOLLO_NAME:-Vulcan-ZZZ}"
+      APOLLO_NAME: "${APOLLO_NAME:-}"
       APOLLO_PORT: "${APOLLO_PORT:-47989}"
 
       WINE_ROOT: "${WINE_ROOT:-/data/spritz-wine-tkg}"
@@ -107,4 +111,6 @@ services:
         hard: -1
 
 volumes:
-  zzz-data:
+  # Each game keeps its own Wine prefix and overlay writes.
+  game-data:
+    name: "vulcan_${GAME_ID:?}-data"

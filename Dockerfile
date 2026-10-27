@@ -116,7 +116,7 @@ RUN groupadd -f seat \
         -G seat,video,render,input \
         -s /bin/bash game
 
-RUN mkdir -p /config/apollo /data /games/zzz /games-ro/zzz \
+RUN mkdir -p /config/apollo /data /games /games-ro \
     && chown -R 1000:1000 /data /games
 
 COPY config/sway /config/sway

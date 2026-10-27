@@ -25,7 +25,7 @@ export WINEDLLOVERRIDES="${WINEDLLOVERRIDES};xinput1_4,xinput1_3,xinput9_1_0=n,b
 
 DXVK_DIR="${DXVK_DIR:-/data/dxvk}"
 
-GAME_EXE="${GAME_EXE:-/games/zzz/ZenlessZoneZero.exe}"
+GAME_EXE="${GAME_EXE:?set GAME_EXE in .env.local}"
 GAME_WIDTH="${GAME_WIDTH:-1920}"
 GAME_HEIGHT="${GAME_HEIGHT:-1080}"
 GAME_FPS="${GAME_FPS:-144}"

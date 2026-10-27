@@ -1,8 +1,10 @@
 SHELL := /bin/bash
+-include .env.local
+GAME_ID ?= zzz
 COMPOSE := docker compose --env-file .env.local -f compose.yaml -f compose.nvidia.yaml
 IMAGE := vulcan/game-stream:local
 CONTAINER := vulcan-game
-VOLUME := vulcan_zzz-data
+VOLUME := vulcan_$(GAME_ID)-data
 
 .DEFAULT_GOAL := help
 
@@ -55,7 +57,7 @@ config: ## Validate and print the resolved compose config
 
 clean: ## Remove game session data; keep prefix and Apollo state
 	$(COMPOSE) down
-	docker run --rm -v $(VOLUME):/data --entrypoint sh $(IMAGE) -c 'rm -rf /data/overlay/zzz/upper/* /data/overlay/zzz/work/* /data/prefix/drive_c/users/*/AppData /data/log/*'
+	docker run --rm -v $(VOLUME):/data --entrypoint sh $(IMAGE) -c 'rm -rf /data/overlay/$(GAME_ID)/upper/* /data/overlay/$(GAME_ID)/work/* /data/prefix/drive_c/users/*/AppData /data/log/*'
 	$(COMPOSE) up -d
 
 reset: ## Remove container and all data; requires CONFIRM=1

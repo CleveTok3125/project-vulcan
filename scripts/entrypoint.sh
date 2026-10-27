@@ -10,6 +10,16 @@ die() {
     exit 1
 }
 
+# shellcheck source=config-lib.sh
+source /usr/local/bin/config-lib.sh
+
+GAME_ID="${GAME_ID:-}"
+if ! is_valid_game_id "$GAME_ID"; then
+    die "invalid GAME_ID '${GAME_ID}': use letters, digits, dot, dash, or underscore, starting with a letter or digit"
+fi
+GAME_PATH="/games/${GAME_ID}"
+GAME_RO_PATH="/games-ro/${GAME_ID}"
+
 GAME_UID="${GAME_UID:-1000}"
 GAME_GID="${GAME_GID:-1000}"
 export XDG_RUNTIME_DIR="/run/user/${GAME_UID}"
@@ -23,6 +33,7 @@ install -d -m 0755 -o "$GAME_UID" -g "$GAME_GID" \
     /data/apollo /data/apollo/credentials /data/home /data/log /data/prefix /data/overlay
 install -d -m 0700 -o "$GAME_UID" -g "$GAME_GID" "$XDG_RUNTIME_DIR"
 install -d -m 0755 /dev/input /run/udev /run/udev/data /run/udev/rules.d
+install -d -m 0755 "$GAME_PATH"
 if [ ! -e /var/run ] && [ ! -L /var/run ]; then
     ln -s /run /var/run
 fi
@@ -43,18 +54,16 @@ if [ "$INPUT_TRANSPORT" != "socket" ]; then
 fi
 
 if [ "${ENABLE_OVERLAY:-1}" = "1" ]; then
-    if [ ! -d /games-ro/zzz ]; then
-        die "missing /games-ro/zzz; mount the host game directory there"
+    if [ ! -d "$GAME_RO_PATH" ]; then
+        die "missing ${GAME_RO_PATH}; mount the host game directory there"
     fi
-    if [ ! -d /games/zzz ]; then
-        die "missing /games/zzz mount point in the image"
-    fi
-    install -d -m 0755 /data/overlay/zzz /data/overlay/zzz/upper /data/overlay/zzz/work
+    overlay_dir="/data/overlay/${GAME_ID}"
+    install -d -m 0755 "$overlay_dir" "$overlay_dir/upper" "$overlay_dir/work"
     chown -R "$GAME_UID:$GAME_GID" /data/overlay
-    if ! mountpoint -q /games/zzz; then
+    if ! mountpoint -q "$GAME_PATH"; then
         mount -t overlay overlay \
-            -o "lowerdir=/games-ro/zzz,upperdir=/data/overlay/zzz/upper,workdir=/data/overlay/zzz/work" \
-            /games/zzz || die "failed to mount overlay for /games/zzz"
+            -o "lowerdir=${GAME_RO_PATH},upperdir=${overlay_dir}/upper,workdir=${overlay_dir}/work" \
+            "$GAME_PATH" || die "failed to mount overlay for ${GAME_PATH}"
     fi
 fi
 
@@ -197,7 +206,7 @@ if [ "$INPUT_BACKEND" = "xtest" ]; then
 fi
 
 APOLLO_ENCODER="${APOLLO_ENCODER:-nvenc}"
-APOLLO_NAME="${APOLLO_NAME:-Vulcan-ZZZ}"
+APOLLO_NAME="${APOLLO_NAME:-Vulcan-${GAME_ID}}"
 APOLLO_PORT="${APOLLO_PORT:-47989}"
 APOLLO_ADAPTER="${APOLLO_ADAPTER:-}"
 APOLLO_OUTPUT="${APOLLO_OUTPUT:-HEADLESS-1}"
@@ -207,7 +216,16 @@ GAME_HEIGHT="${GAME_HEIGHT:-1080}"
 GAME_FPS="${GAME_FPS:-144}"
 GAME_MODE="${GAME_WIDTH}x${GAME_HEIGHT}@${GAME_FPS}Hz"
 
+# The app entry is generated from the image template. GAME_APP_UUID must stay
+# stable for a given game, or clients lose the app's stored state.
+APOLLO_APP_NAME="${GAME_APP_NAME:-${GAME_ID}}"
+APOLLO_APP_UUID="${GAME_APP_UUID:-$(derive_app_uuid "$GAME_ID")}"
+APOLLO_APP_CMD="/usr/local/bin/launch-game.sh"
+
 install -d -m 0755 /data/sway
+
+render_apollo_apps /config/apollo/apps.json /data/apollo/apps.json \
+    "$APOLLO_APP_NAME" "$APOLLO_APP_CMD" "$APOLLO_APP_UUID"
 
 sed \
     -e "s|@ENCODER@|${APOLLO_ENCODER}|g" \
@@ -226,7 +244,7 @@ if [ -z "$APOLLO_ADAPTER" ]; then
     mv /data/apollo/sunshine.conf.tmp /data/apollo/sunshine.conf
 fi
 
-chown "$GAME_UID:$GAME_GID" /data/apollo/sunshine.conf /data/sway/config
+chown "$GAME_UID:$GAME_GID" /data/apollo/sunshine.conf /data/apollo/apps.json /data/sway/config
 
 log "starting Sway with ${SWAY_BACKENDS} (input: ${INPUT_BACKEND})"
 as_game_netns env \

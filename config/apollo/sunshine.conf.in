@@ -8,7 +8,7 @@ output_name = @OUTPUT@
 encoder = @ENCODER@
 adapter_name = @ADAPTER@
 
-file_apps = /config/apollo/apps.json
+file_apps = /data/apollo/apps.json
 file_state = /data/apollo/sunshine_state.json
 log_path = /data/apollo/sunshine.log
 pkey = /data/apollo/credentials/cakey.pem
