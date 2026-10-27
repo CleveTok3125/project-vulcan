@@ -19,6 +19,7 @@ const EI_EVENT_DISCONNECT: c_int = 2;
 const EI_EVENT_SEAT_ADDED: c_int = 3;
 const EI_EVENT_DEVICE_ADDED: c_int = 5;
 const EI_EVENT_DEVICE_REMOVED: c_int = 6;
+const EI_EVENT_DEVICE_PAUSED: c_int = 7;
 const EI_EVENT_DEVICE_RESUMED: c_int = 8;
 
 const EI_DEVICE_CAP_POINTER: c_uint = 1 << 0;
@@ -90,7 +91,9 @@ struct Backend {
     context: *mut ei,
     device: *mut ei_device,
     sequence: u32,
+    emulating: bool,
     last_attempt: Option<Instant>,
+    last_pump: Option<Instant>,
     last_wait_log: Option<Instant>,
     absolute_x: i32,
     absolute_y: i32,
@@ -109,7 +112,9 @@ impl Backend {
             context: std::ptr::null_mut(),
             device: std::ptr::null_mut(),
             sequence: 0,
+            emulating: false,
             last_attempt: None,
+            last_pump: None,
             last_wait_log: None,
             absolute_x: 0,
             absolute_y: 0,
@@ -163,6 +168,8 @@ impl Backend {
             unsafe { ei_unref(self.context) };
             self.context = std::ptr::null_mut();
         }
+        self.emulating = false;
+        self.last_pump = None;
     }
 
     fn ready(&self) -> bool {
@@ -181,7 +188,8 @@ impl Backend {
 
     fn ensure_connected(&mut self) -> bool {
         if self.ready() {
-            return true;
+            self.pump();
+            return self.emulating;
         }
         if let Some(last) = self.last_attempt {
             if last.elapsed() < Duration::from_millis(250) {
@@ -210,80 +218,119 @@ impl Backend {
             }
         }
 
+        let deadline = Instant::now() + Duration::from_millis(500);
+        while Instant::now() < deadline && !self.emulating {
+            if !self.poll_eis(Duration::from_millis(20)) {
+                self.reset();
+                return false;
+            }
+        }
+
+        if self.emulating {
+            eprintln!("[vulcan-inputd] connected to gamescope EIS");
+        }
+        self.emulating
+    }
+
+    /// Read and dispatch whatever libei has queued.
+    fn poll_eis(&mut self, timeout: Duration) -> bool {
         let fd = unsafe { ei_get_fd(self.context) };
         if fd < 0 {
-            self.reset();
             return false;
         }
 
-        let deadline = Instant::now() + Duration::from_millis(500);
-        while Instant::now() < deadline && !self.ready() {
-            let mut poll_fd = libc::pollfd {
-                fd,
-                events: libc::POLLIN,
-                revents: 0,
-            };
-            let result = unsafe { libc::poll(&mut poll_fd, 1, 20) };
-            if result < 0 {
-                if io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
-                    break;
-                }
-                continue;
-            }
-            if result == 0 {
-                continue;
-            }
-
-            unsafe { ei_dispatch(self.context) };
-            loop {
-                let event = unsafe { ei_get_event(self.context) };
-                if event.is_null() {
-                    break;
-                }
-                let event_type = unsafe { ei_event_get_type(event) };
-                match event_type {
-                    EI_EVENT_CONNECT => {}
-                    EI_EVENT_SEAT_ADDED => {
-                        let seat = unsafe { ei_event_get_seat(event) };
-                        if !seat.is_null() {
-                            unsafe {
-                                ei_seat_bind_capabilities(
-                                    seat,
-                                    EI_DEVICE_CAP_POINTER,
-                                    EI_DEVICE_CAP_POINTER_ABSOLUTE,
-                                    EI_DEVICE_CAP_BUTTON,
-                                    EI_DEVICE_CAP_SCROLL,
-                                    EI_DEVICE_CAP_KEYBOARD,
-                                    std::ptr::null::<c_void>(),
-                                );
-                            }
-                        }
-                    }
-                    EI_EVENT_DEVICE_ADDED | EI_EVENT_DEVICE_RESUMED => {
-                        if self.device.is_null() {
-                            let device = unsafe { ei_event_get_device(event) };
-                            if !device.is_null() {
-                                self.device = unsafe { ei_device_ref(device) };
-                            }
-                        }
-                        if event_type == EI_EVENT_DEVICE_RESUMED && !self.device.is_null() {
-                            self.sequence = self.sequence.wrapping_add(1);
-                            unsafe { ei_device_start_emulating(self.device, self.sequence) };
-                        }
-                    }
-                    EI_EVENT_DEVICE_REMOVED | EI_EVENT_DISCONNECT => {
-                        self.reset();
-                    }
-                    _ => {}
-                }
-                unsafe { ei_event_unref(event) };
-            }
+        let mut poll_fd = libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let result = unsafe { libc::poll(&mut poll_fd, 1, timeout.as_millis() as c_int) };
+        if result < 0 {
+            return io::Error::last_os_error().kind() == io::ErrorKind::Interrupted;
+        }
+        if result == 0 {
+            return true;
         }
 
-        if self.ready() {
-            eprintln!("[vulcan-inputd] connected to gamescope EIS");
+        unsafe { ei_dispatch(self.context) };
+        self.dispatch_events();
+        true
+    }
+
+    /// Keep the device state current between input events.
+    ///
+    /// The server only resumes a device after `ei_device_start_emulating`, so
+    /// the resume event has to be read outside the connection attempt as well.
+    fn pump(&mut self) {
+        if let Some(last) = self.last_pump {
+            if last.elapsed() < Duration::from_millis(20) {
+                return;
+            }
         }
-        self.ready()
+        self.last_pump = Some(Instant::now());
+        if !self.poll_eis(Duration::from_millis(0)) {
+            self.reset();
+        }
+    }
+
+    fn dispatch_events(&mut self) {
+        loop {
+            let event = unsafe { ei_get_event(self.context) };
+            if event.is_null() {
+                break;
+            }
+            let event_type = unsafe { ei_event_get_type(event) };
+            match event_type {
+                EI_EVENT_CONNECT => {}
+                EI_EVENT_SEAT_ADDED => {
+                    let seat = unsafe { ei_event_get_seat(event) };
+                    if !seat.is_null() {
+                        unsafe {
+                            ei_seat_bind_capabilities(
+                                seat,
+                                EI_DEVICE_CAP_POINTER,
+                                EI_DEVICE_CAP_POINTER_ABSOLUTE,
+                                EI_DEVICE_CAP_BUTTON,
+                                EI_DEVICE_CAP_SCROLL,
+                                EI_DEVICE_CAP_KEYBOARD,
+                                std::ptr::null::<c_void>(),
+                            );
+                        }
+                    }
+                }
+                EI_EVENT_DEVICE_ADDED => {
+                    if self.device.is_null() {
+                        let device = unsafe { ei_event_get_device(event) };
+                        if !device.is_null() {
+                            self.device = unsafe { ei_device_ref(device) };
+                        }
+                    }
+                    self.start_emulating();
+                }
+                EI_EVENT_DEVICE_RESUMED => {
+                    if !self.emulating {
+                        eprintln!("[vulcan-inputd] EIS device emulating");
+                    }
+                    self.emulating = true;
+                }
+                EI_EVENT_DEVICE_PAUSED => {
+                    eprintln!("[vulcan-inputd] EIS device paused");
+                    self.emulating = false;
+                    self.start_emulating();
+                }
+                EI_EVENT_DEVICE_REMOVED | EI_EVENT_DISCONNECT => self.reset(),
+                _ => {}
+            }
+            unsafe { ei_event_unref(event) };
+        }
+    }
+
+    fn start_emulating(&mut self) {
+        if self.device.is_null() {
+            return;
+        }
+        self.sequence = self.sequence.wrapping_add(1);
+        unsafe { ei_device_start_emulating(self.device, self.sequence) };
     }
 
     fn frame(&self) {
