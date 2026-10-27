@@ -94,6 +94,10 @@ services:
       UMU_USE_STEAM: "${UMU_USE_STEAM:-1}"
       D3D_BACKEND: "${D3D_BACKEND:-dxvk}"
       DXVK_DIR: "/data/dxvk"
+      WINEESYNC: "${WINEESYNC:-}"
+      WINEFSYNC: "${WINEFSYNC:-}"
+      __GL_SHADER_DISK_CACHE_SKIP_CLEANUP: "${__GL_SHADER_DISK_CACHE_SKIP_CLEANUP:-}"
+      DXVK_HUD: "${DXVK_HUD:-}"
 
       # NVIDIA device nodes are supplied by compose.nvidia.yaml.
       NVIDIA_VISIBLE_DEVICES: "${NVIDIA_VISIBLE_DEVICES:-0}"

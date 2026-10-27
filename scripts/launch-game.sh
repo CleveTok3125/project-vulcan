@@ -8,6 +8,16 @@ export WINE_ROOT="${WINE_ROOT:-${PROTONPATH:-/data/spritz-wine-tkg}}"
 export UMU_USE_STEAM="${UMU_USE_STEAM:-1}"
 export WINEDEBUG="${WINEDEBUG:--all}"
 export WINEARCH="${WINEARCH:-win64}"
+# Eventfd/futex synchronisation avoids wineserver round trips. fsync needs
+# futex_waitv (Linux 5.16 or later).
+export WINEESYNC="${WINEESYNC:-1}"
+export WINEFSYNC="${WINEFSYNC:-1}"
+# No input method runs in the container; keep the host one out of Wine.
+export XMODIFIERS="${XMODIFIERS:-@im=none}"
+# Keep the NVIDIA GL shader cache instead of letting the driver prune it.
+export __GL_SHADER_DISK_CACHE_SKIP_CLEANUP="${__GL_SHADER_DISK_CACHE_SKIP_CLEANUP:-1}"
+# Empty by default; set to e.g. fps,frametimes to show the DXVK overlay.
+export DXVK_HUD="${DXVK_HUD:-}"
 D3D_BACKEND="${D3D_BACKEND:-dxvk}"
 case "$D3D_BACKEND" in
     wined3d)
