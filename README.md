@@ -108,13 +108,12 @@ GAMESCOPE_GRAB_CURSOR=1
 GAMESCOPE_HIDE_CURSOR_DELAY=86400000
 GAMESCOPE_TOUCH_MODE=4
 INPUT_GAMEPAD=1
-RENDER_NODE=/dev/dri/renderD128
 UMU_USE_STEAM=1
 ```
 
-`GAME_ID`, `GAME_DIR` and `GAME_EXE` are required. `GAME_DIR` is mounted at
-`/games-ro/<GAME_ID>`; `GAME_EXE` is the executable path inside the
-writable overlay view at `/games/<GAME_ID>`.
+`GAME_ID`, `GAME_DIR`, `GAME_EXE`, `RENDER_NODE`, and `SPRITZ_DIR` are
+required. `GAME_DIR` is mounted at `/games-ro/<GAME_ID>`; `GAME_EXE` is the
+executable path inside the writable overlay view at `/games/<GAME_ID>`.
 
 ### Game identity
 
@@ -168,7 +167,20 @@ The `make` targets pass `compose.nvidia.yaml`; on AMD/Intel hosts use the raw
    When the host has no event node, `getent group input` gives `GID_INPUT`.
    A device owned by group `0` cannot be read by the game user.
 
-2. Create the local configuration:
+2. Choose the render node of the encoder GPU. The node numbering does not
+   follow the card numbering, and a node from the wrong vendor leaves Apollo
+   without an encoder:
+
+   ```bash
+   for f in /sys/class/drm/renderD*/device/vendor; do echo "$f $(cat "$f")"; done
+   ```
+
+   `0x10de` is NVIDIA and `0x1002` is AMD. Use the resulting node as
+   `RENDER_NODE`. A wrong node makes Apollo report
+   `Couldn't initialize EGL display`, select no encoder, and disconnect the
+   client right after the app starts.
+
+3. Create the local configuration:
 
    ```bash
    cp .env.example .env.local
@@ -176,17 +188,17 @@ The `make` targets pass `compose.nvidia.yaml`; on AMD/Intel hosts use the raw
    make config
    ```
 
-   `GAME_ID`, `GAME_DIR`, `GAME_EXE`, `SPRITZ_DIR`, and the GIDs are
-   required. `make config` prints the resolved compose configuration and
-   stops at a missing or malformed value.
+   `GAME_ID`, `GAME_DIR`, `GAME_EXE`, `SPRITZ_DIR`, `RENDER_NODE`, and the
+   GIDs are required. `make config` prints the resolved compose configuration
+   and stops at a missing or malformed value.
 
-3. Build the image:
+4. Build the image:
 
    ```bash
    make build
    ```
 
-4. Start the container:
+5. Start the container:
 
    ```bash
    make up
@@ -201,12 +213,12 @@ The `make` targets pass `compose.nvidia.yaml`; on AMD/Intel hosts use the raw
      tail -f /data/apollo/sunshine.log
    ```
 
-5. Open `https://<host>:47990` (`APOLLO_PORT + 1`), accept the self-signed
+6. Open `https://<host>:47990` (`APOLLO_PORT + 1`), accept the self-signed
    certificate, create the web credentials, and pair the first client. The
    app entry is generated at startup from `config/apollo/apps.json` and runs
    `launch-game.sh`.
 
-6. Verify the GPU nodes and the session logs:
+7. Verify the GPU nodes and the session logs:
 
    ```bash
    make stats
@@ -249,17 +261,8 @@ Defaults:
 
 The container receives only the render node named by `RENDER_NODE` plus the
 NVIDIA device nodes from `compose.nvidia.yaml`; a host iGPU is not passed
-through. Keep `RENDER_NODE` on the GPU that runs gamescope and the encoder.
-The render node numbering does not follow the card numbering, so check the
-vendor instead of taking the first node:
-
-```bash
-for f in /sys/class/drm/renderD*/device/vendor; do echo "$f $(cat "$f")"; done
-```
-
-`0x10de` is NVIDIA and `0x1002` is AMD. A node from the wrong vendor makes
-Apollo report `Couldn't initialize EGL display` and select no encoder, which
-disconnects the client right after the app starts.
+through. `RENDER_NODE` must be the render node of the GPU that runs gamescope
+and the encoder; the deployment steps show how to identify it.
 
 Every streamed frame goes through two composition steps:
 
@@ -280,7 +283,7 @@ VRAM capture path into a GPU -> RAM -> GPU transfer.
 Change resolution or FPS in `.env.local`:
 
 - `GAME_WIDTH`, `GAME_HEIGHT`, `GAME_FPS`
-- `RENDER_NODE` if the host render node is not `/dev/dri/renderD128`
+- `RENDER_NODE` if the encoder GPU moves to another render node
 
 The Sway config is rendered from `config/sway/config.in` at startup, so the
 template only needs editing for structural changes.

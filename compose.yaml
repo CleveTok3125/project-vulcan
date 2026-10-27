@@ -28,7 +28,7 @@ services:
 
     # Only the selected render node is exposed. Never add /dev/dri/card*.
     devices:
-      - "${RENDER_NODE:-/dev/dri/renderD128}"
+      - "${RENDER_NODE:?set RENDER_NODE in .env.local}"
 
     # Input event nodes are created on demand by the in-container broker.
     device_cgroup_rules:
@@ -82,7 +82,7 @@ services:
       INPUT_EXTRA_NAMES: "${INPUT_EXTRA_NAMES:-Sunshine X-Box One (virtual) pad,Sunshine PS5 (virtual) pad,Sunshine Nintendo (virtual) pad}"
       ENABLE_OVERLAY: "${ENABLE_OVERLAY:-1}"
 
-      RENDER_NODE: "${RENDER_NODE:-/dev/dri/renderD128}"
+      RENDER_NODE: "${RENDER_NODE:?set RENDER_NODE in .env.local}"
       APOLLO_OUTPUT: "${APOLLO_OUTPUT:-HEADLESS-1}"
       APOLLO_ENCODER: "${APOLLO_ENCODER:-nvenc}"
       APOLLO_ADAPTER: "${APOLLO_ADAPTER:-}"

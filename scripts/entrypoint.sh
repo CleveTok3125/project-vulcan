@@ -19,6 +19,7 @@ if ! is_valid_game_id "$GAME_ID"; then
 fi
 GAME_PATH="/games/${GAME_ID}"
 GAME_RO_PATH="/games-ro/${GAME_ID}"
+RENDER_NODE="${RENDER_NODE:?set RENDER_NODE in .env.local}"
 
 GAME_UID="${GAME_UID:-1000}"
 GAME_GID="${GAME_GID:-1000}"
@@ -75,8 +76,8 @@ read_gid() {
 }
 
 GID_INPUT="${GID_INPUT:-$(read_gid /dev/input)}"
-GID_RENDER="${GID_RENDER:-$(read_gid /dev/dri/renderD128)}"
-GID_VIDEO="${GID_VIDEO:-$(read_gid /dev/dri/renderD128)}"
+GID_RENDER="${GID_RENDER:-$(read_gid "$RENDER_NODE")}"
+GID_VIDEO="${GID_VIDEO:-$(read_gid "$RENDER_NODE")}"
 GID_STORAGE="${GID_STORAGE:-$(read_gid /dev/dri/card0)}"
 GID_SEAT="$(getent group seat | cut -d: -f3 || true)"
 
@@ -213,7 +214,6 @@ APOLLO_NAME="${APOLLO_NAME:-Vulcan-${GAME_ID}}"
 APOLLO_PORT="${APOLLO_PORT:-47989}"
 APOLLO_ADAPTER="${APOLLO_ADAPTER:-}"
 APOLLO_OUTPUT="${APOLLO_OUTPUT:-HEADLESS-1}"
-RENDER_NODE="${RENDER_NODE:-/dev/dri/renderD128}"
 GAME_WIDTH="${GAME_WIDTH:-1920}"
 GAME_HEIGHT="${GAME_HEIGHT:-1080}"
 GAME_FPS="${GAME_FPS:-144}"
