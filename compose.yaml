@@ -9,6 +9,7 @@ services:
         INSTALL_CUDA: "${INSTALL_CUDA:-1}"
         APOLLO_PKG: "${APOLLO_PKG:-apollo-git}"
         APOLLO_COMMIT: "${APOLLO_COMMIT:-adc5c5a0bd80831ce495434bb16aee2cd4175fb8}"
+        MIRROR_COUNTRY: "${MIRROR_COUNTRY:-}"
     image: vulcan/game-stream:local
     container_name: vulcan-game
     init: true

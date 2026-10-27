@@ -2,20 +2,49 @@
 
 # Arch is used because Sway and gamescope are current there.
 # Pin the base image digest before publishing a reproducible build.
-FROM cachyos/cachyos-v3@sha256:91d3b3f4db6016ca308765122d4c02049c39068ae37c509365047fa2c02d9af5 AS rust-builder
-RUN pacman -Syu --noconfirm --needed --disable-download-timeout rust gcc libei
+FROM cachyos/cachyos-v3@sha256:91d3b3f4db6016ca308765122d4c02049c39068ae37c509365047fa2c02d9af5 AS base
+
+# The image ships a fixed mirror list; rate the reachable mirrors once per
+# build so package downloads do not stall on a slow or blocked server.
+#
+# cachyos-rate-mirrors prepends its own CDN to the rated Arch list. Move that
+# entry to the end so the fastest rated mirror is tried first and the CDN stays
+# as a fallback. MIRROR_COUNTRY skips geo detection when set.
+#
+# The default 1s speed sample ranks bursts over sustained throughput, so each
+# mirror is sampled longer before it is sorted.
+ARG MIRROR_COUNTRY=
+RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
+    pacman -Sy --noconfirm --needed cachyos-rate-mirrors \
+    && (RATE_MIRRORS_ENTRY_COUNTRY="${MIRROR_COUNTRY}" \
+        RATE_MIRRORS_MIN_PER_MIRROR=1000 \
+        RATE_MIRRORS_MAX_PER_MIRROR=3000 \
+        RATE_MIRRORS_PER_MIRROR_TIMEOUT=15000 \
+        cachyos-rate-mirrors \
+        || printf '%s\n' 'Mirror rating failed; keeping the image mirror list.' >&2) \
+    && sed -i '/^Server = https:\/\/archlinux\.cachyos\.org\/repo/d' /etc/pacman.d/mirrorlist \
+    && printf 'Server = https://archlinux.cachyos.org/repo/$repo/os/$arch\n' >> /etc/pacman.d/mirrorlist
+
+FROM base AS rust-builder
+RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
+    pacman -Syu --noconfirm --needed --disable-download-timeout rust gcc libei
 COPY rust /build
 WORKDIR /build
-RUN cargo build --release --locked
+RUN --mount=type=cache,target=/root/.cargo/registry,sharing=locked \
+    --mount=type=cache,target=/root/.cargo/git,sharing=locked \
+    cargo build --release --locked
 
-FROM cachyos/cachyos-v3@sha256:91d3b3f4db6016ca308765122d4c02049c39068ae37c509365047fa2c02d9af5
+FROM base
 
 ARG GPU_VENDOR=nvidia
 ARG INSTALL_CUDA=1
 ARG APOLLO_PKG=apollo-git
 ARG APOLLO_COMMIT=adc5c5a0bd80831ce495434bb16aee2cd4175fb8
 
-RUN pacman -Syu --noconfirm --needed --disable-download-timeout \
+# Refresh the databases after the mirror change so package URLs match the
+# rated mirror instead of the image's original one.
+RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
+    pacman -Syyu --noconfirm --needed --disable-download-timeout \
         base-devel \
         git \
         sudo \
