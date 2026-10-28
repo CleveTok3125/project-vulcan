@@ -4,6 +4,8 @@ services:
     # nodes is enough. Keep this list in sync with the host driver version;
     # rebuild the image after a major driver update.
     devices:
+      # NVENC opens the primary DRM node of the GPU for the CUDA/EGL interop.
+      - /dev/dri/card0
       - /dev/nvidiactl
       - /dev/nvidia0
       - /dev/nvidia-modeset
