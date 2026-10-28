@@ -387,9 +387,14 @@ Apollo gamepad -> shim -> vulcan-inputd -> vulcan-gamepad.bin
 ```
 
 The shim fakes the gamepad and `vulcan-inputd` writes the pad state to
-`/data/prefix/drive_c/vulcan-gamepad.bin`. `launch-game.sh` installs the
-native XInput DLL and sets `WINEDLLOVERRIDES`. Set `INPUT_GAMEPAD=0` to
-disable the gamepad.
+`/data/prefix/drive_c/vulcan-gamepad.bin`, which Wine sees as
+`C:\vulcan-gamepad.bin`. The file lives in the `vulcan_<GAME_ID>-data` volume.
+The input socket is `/run/user/1000/vulcan-input.sock`; `/run` is a tmpfs, so
+the socket exists only while the container runs.
+
+`launch-game.sh` installs the native XInput DLL and sets `WINEDLLOVERRIDES`.
+Set `INPUT_GAMEPAD=0` to skip both the pad state file and the DLL. Games that
+use DirectInput or raw HID instead of XInput do not see a controller.
 
 The input broker mirrors Apollo's remaining uinput nodes into the container's
 private `/dev/input` and emits udev events so libinput can hotplug them. Sway
