@@ -143,4 +143,8 @@ RUN gcc -O2 -shared -fPIC -o /usr/lib/libglycin-nosandbox.so /tmp/native/glycin-
     && { setcap -r /usr/bin/sway || true; } \
     && { setcap -r /usr/bin/btop || true; }
 
+# Tools run inside the container (btop, git, editors) need a UTF-8 charset;
+# glibc provides C.UTF-8 without generated locale files.
+ENV LANG=C.UTF-8
+
 ENTRYPOINT ["/usr/bin/catatonit", "--", "/usr/local/bin/entrypoint.sh"]
