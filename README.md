@@ -19,8 +19,9 @@ Docker (rootful)
    └─ input broker (event nodes -> private /dev/input)
 ```
 
-Only `/dev/dri/renderD128` is passed to the container. `/dev/dri/card*` is
-never passed, so Sway cannot take DRM master from the host session.
+The container receives the render node named by `RENDER_NODE`. On NVIDIA it
+also receives the GPU's primary card node, which only the encoder opens, plus
+the NVIDIA device nodes; the other cards are not passed.
 
 Sway is the capture surface: gamescope does not expose
 `zwlr_screencopy_manager_v1`, and Apollo on Linux does not currently provide a
@@ -143,15 +144,6 @@ separate. Volumes of games that are no longer configured remain on the host;
 remove them with `docker volume rm`. Only one game runs at a time: the
 container name and Apollo port are fixed.
 
-For AMD:
-
-```dotenv
-GPU_VENDOR=amd
-INSTALL_CUDA=0
-APOLLO_ENCODER=vaapi
-APOLLO_ADAPTER=/dev/dri/renderD128
-```
-
 ## Fresh deployment
 
 These steps start from a checkout with no image, volume, or `.env.local`.
@@ -166,8 +158,7 @@ The `make` targets pass `compose.nvidia.yaml`; on AMD/Intel hosts use the raw
    ```
 
    The values are `GID_INPUT` and `GID_RENDER`. `GID_VIDEO` is the numeric
-   video group from `getent group video`; compose requires it even though no
-   card node is passed.
+   video group from `getent group video`; compose requires it.
    When the host has no event node, `getent group input` gives `GID_INPUT`.
    A device owned by group `0` cannot be read by the game user.
 
@@ -235,22 +226,41 @@ To run a different game later, see [Game identity](#game-identity).
 ### NVIDIA devices
 
 The image includes NVIDIA userland libraries, so the compose override passes
-the host driver nodes directly. Keep the override in sync with the host GPU
-node names and rebuild the image after a major driver update.
+the host driver nodes directly. Keep the override in sync with the host node
+names and rebuild the image after a major driver update.
+
+NVENC needs the primary DRM node of the NVIDIA GPU. The CUDA path maps the
+device PCI bus ID to the first `card*` entry in sysfs and opens it for the
+GBM/EGL interop, so the override passes that node (for example
+`/dev/dri/card0`) next to `RENDER_NODE`. AMD and Intel do not need it; see
+[AMD and Intel](#amd-and-intel).
 
 ```bash
 docker compose --env-file .env.local -f compose.yaml -f compose.nvidia.yaml up -d
 ```
-
-Do not use `--gpus all` blindly: verify inside the container that
-`/dev/dri/card0` was not mounted.
 
 ```bash
 docker compose --env-file .env.local exec game ls -l /dev/dri
 docker compose --env-file .env.local exec game ls -l /dev/nvidia*
 ```
 
-Expected: `renderD128` and NVIDIA control/device nodes; no `card0`.
+Expected: the primary card node, the render node, and the NVIDIA control and
+device nodes. Apollo logs `Found DRM primary node` and `Found CUDA device`;
+without the primary node NVENC fails and the session falls back to software
+encoding.
+
+### AMD and Intel
+
+VAAPI opens the render node in `APOLLO_ADAPTER`, or `/dev/dri/renderD128` when
+it is empty. It never opens a primary card node. Set `APOLLO_ADAPTER` when the
+render node is not `renderD128`.
+
+```dotenv
+GPU_VENDOR=amd
+INSTALL_CUDA=0
+APOLLO_ENCODER=vaapi
+APOLLO_ADAPTER=/dev/dri/renderD128
+```
 
 ## Display and game
 
@@ -279,10 +289,11 @@ Defaults:
 
 ### GPU path
 
-The container receives only the render node named by `RENDER_NODE` plus the
-NVIDIA device nodes from `compose.nvidia.yaml`; a host iGPU is not passed
-through. `RENDER_NODE` must be the render node of the GPU that runs gamescope
-and the encoder; see [Fresh deployment](#fresh-deployment).
+The container receives the render node named by `RENDER_NODE`. On NVIDIA,
+`compose.nvidia.yaml` also passes the primary card node and the NVIDIA device
+nodes; AMD/Intel need only the render node. A host iGPU is not passed through.
+`RENDER_NODE` must be the render node of the GPU that runs gamescope and the
+encoder; see [Fresh deployment](#fresh-deployment).
 
 Every streamed frame goes through two composition steps:
 
@@ -470,7 +481,8 @@ Additional hardening:
 - after startup the entrypoint continues as the game user, and the broker
   drops to `MKNOD` and `NET_ADMIN`
 - keep `no-new-privileges:true`
-- do not pass `/dev/dri/card*`
+- pass only the DRM nodes the encoder needs: on NVIDIA the primary card node
+  plus `RENDER_NODE`; on AMD/Intel only the render node
 - do not mount the host Wayland/X11 sockets
 - keep `/dev/uinput` out of the container
 
@@ -502,7 +514,7 @@ ffmpeg -hide_banner -encoders | grep nvenc
 Expected:
 
 - `HEADLESS-1` at 1920x1080@144
-- no `/dev/dri/card0`
+- `RENDER_NODE` and, on NVIDIA, the primary card node
 - only expected input event nodes
 - `swaymsg -t get_inputs` lists the passthrough devices while a client is
   connected
