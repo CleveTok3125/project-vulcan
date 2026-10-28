@@ -87,6 +87,20 @@ The local file is ignored by git. Use it explicitly:
 docker compose --env-file .env.local -f compose.yaml -f compose.nvidia.yaml up -d
 ```
 
+Keep one file per game or host profile and select it with `ENV_FILE`:
+
+```bash
+cp .env.example .env.zzz
+cp .env.example .env.demo
+$EDITOR .env.zzz
+make up ENV_FILE=.env.zzz
+```
+
+Every target accepts `ENV_FILE`, including `build`, `logs`, `clean`, and
+`reset`. The value is a path relative to the repository root; `.env.local`
+is the default. Only one container runs at a time, and each `GAME_ID` keeps
+its own volume.
+
 Example:
 
 ```dotenv
@@ -128,16 +142,16 @@ default Apollo host name `Vulcan-<GAME_ID>`.
 that app entry; leave it empty to derive a stable UUID from `GAME_ID`, or set
 it explicitly, for example to keep the identity clients already stored.
 
-To run a different game, edit `.env.local` and recreate the container:
+To run a different game, keep its settings in a separate preset and select
+it for every target:
 
 ```bash
-# GAME_ID=demo
-# GAME_DIR=/srv/games/demo
-# GAME_EXE=/games/demo/Demo.exe
-# GAME_APP_NAME=Demo
 make down
-make up
+make up ENV_FILE=.env.demo
 ```
+
+Create the preset with `cp .env.example .env.demo` and set `GAME_ID`,
+`GAME_DIR`, `GAME_EXE`, and `GAME_APP_NAME` as described above.
 
 The new game gets its own volume, so its Wine prefix and overlay writes stay
 separate. Volumes of games that are no longer configured remain on the host;
@@ -268,13 +282,13 @@ Defaults:
 
 - Sway: `HEADLESS-1`, `1920x1080@144`.
 - gamescope: `--backend wayland`, fullscreen, 1920x1080@144.
-- Game executable: `GAME_EXE` from `.env.local`.
+- Game executable: `GAME_EXE` from the selected env file.
 - Wine: `/data/spritz-wine-tkg/bin/wine64`, with `UMU_USE_STEAM=1`.
 
 ### Wine environment
 
-`launch-game.sh` exports these before Wine starts; override them in
-`.env.local`:
+`launch-game.sh` exports these before Wine starts; override them in the
+selected env file:
 
 - `WINEESYNC=1` and `WINEFSYNC=1` use eventfd and futex synchronisation
   instead of wineserver round trips. fsync requires `futex_waitv`, available
@@ -311,7 +325,7 @@ Keeping every step on one GPU matters more than the extra pass. Pointing
 cross-GPU dmabuf import for every frame, and drops Apollo out of the zero-copy
 VRAM capture path into a GPU -> RAM -> GPU transfer.
 
-Change resolution or FPS in `.env.local`:
+Change resolution or FPS in the selected env file:
 
 - `GAME_WIDTH`, `GAME_HEIGHT`, `GAME_FPS`
 - `RENDER_NODE` if the encoder GPU moves to another render node

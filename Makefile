@@ -1,7 +1,9 @@
 SHELL := /bin/bash
--include .env.local
+# Select another configuration preset with `make <target> ENV_FILE=<path>`.
+ENV_FILE ?= .env.local
+-include $(ENV_FILE)
 GAME_ID ?= zzz
-COMPOSE := docker compose --env-file .env.local -f compose.yaml -f compose.nvidia.yaml
+COMPOSE = docker compose --env-file $(ENV_FILE) -f compose.yaml -f compose.nvidia.yaml
 IMAGE := vulcan/game-stream:local
 CONTAINER := vulcan-game
 VOLUME := vulcan_$(GAME_ID)-data
@@ -12,6 +14,7 @@ VOLUME := vulcan_$(GAME_ID)-data
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@printf '\nENV_FILE selects the configuration preset (default: .env.local).\n'
 
 build: ## Build the container image
 	$(COMPOSE) build

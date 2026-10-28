@@ -40,7 +40,7 @@ fi
 
 DXVK_DIR="${DXVK_DIR:-/data/dxvk}"
 
-GAME_EXE="${GAME_EXE:?set GAME_EXE in .env.local}"
+GAME_EXE="${GAME_EXE:?set GAME_EXE in the env file}"
 GAME_WIDTH="${GAME_WIDTH:-1920}"
 GAME_HEIGHT="${GAME_HEIGHT:-1080}"
 GAME_FPS="${GAME_FPS:-144}"

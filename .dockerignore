@@ -2,7 +2,7 @@
 .note.ai
 .trash
 .env
-.env.local
+.env*
 data
 *.log
 artifacts

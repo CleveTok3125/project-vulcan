@@ -28,7 +28,7 @@ services:
 
     # Only the selected render node is exposed. Never add /dev/dri/card*.
     devices:
-      - "${RENDER_NODE:?set RENDER_NODE in .env.local}"
+      - "${RENDER_NODE:?set RENDER_NODE in the selected env file}"
 
     # Input event nodes are created on demand by the in-container broker.
     device_cgroup_rules:
@@ -57,17 +57,17 @@ services:
     # the game process by the entrypoint. They are not added with group_add,
     # because input and uinput often share the same host GID.
     volumes:
-      - "${GAME_DIR:?set GAME_DIR in .env.local}:/games-ro/${GAME_ID:?}:ro"
-      - "${SPRITZ_DIR:?set SPRITZ_DIR in .env.local}:/data/spritz-wine-tkg:ro"
+      - "${GAME_DIR:?set GAME_DIR in the selected env file}:/games-ro/${GAME_ID:?}:ro"
+      - "${SPRITZ_DIR:?set SPRITZ_DIR in the selected env file}:/data/spritz-wine-tkg:ro"
       - "${DXVK_HOST_DIR:-/usr/share/dxvk}:/data/dxvk:ro"
       - "game-data:/data"
 
     environment:
-      GAME_ID: "${GAME_ID:?set GAME_ID in .env.local}"
+      GAME_ID: "${GAME_ID:?set GAME_ID in the selected env file}"
       GAME_WIDTH: "${GAME_WIDTH:-1920}"
       GAME_HEIGHT: "${GAME_HEIGHT:-1080}"
       GAME_FPS: "${GAME_FPS:-144}"
-      GAME_EXE: "${GAME_EXE:?set GAME_EXE in .env.local}"
+      GAME_EXE: "${GAME_EXE:?set GAME_EXE in the selected env file}"
       GAME_APP_NAME: "${GAME_APP_NAME:-}"
       GAME_APP_UUID: "${GAME_APP_UUID:-}"
       GAME_RESET_PATHS: "${GAME_RESET_PATHS:-}"
@@ -85,7 +85,7 @@ services:
       INPUT_EXTRA_NAMES: "${INPUT_EXTRA_NAMES:-Sunshine X-Box One (virtual) pad,Sunshine PS5 (virtual) pad,Sunshine Nintendo (virtual) pad}"
       ENABLE_OVERLAY: "${ENABLE_OVERLAY:-1}"
 
-      RENDER_NODE: "${RENDER_NODE:?set RENDER_NODE in .env.local}"
+      RENDER_NODE: "${RENDER_NODE:?set RENDER_NODE in the selected env file}"
       APOLLO_OUTPUT: "${APOLLO_OUTPUT:-HEADLESS-1}"
       APOLLO_ENCODER: "${APOLLO_ENCODER:-nvenc}"
       APOLLO_ADAPTER: "${APOLLO_ADAPTER:-}"

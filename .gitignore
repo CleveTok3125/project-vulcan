@@ -1,6 +1,7 @@
 .note.ai/
 .trash/
 .env
-.env.local
+.env.*
+!.env.example
 data/
 *.log
