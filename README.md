@@ -462,11 +462,13 @@ Additional hardening:
 - keep `read_only: true`
 - keep `cap_drop: ALL`
 - add only what the entrypoint needs: `MKNOD` for the input broker,
-  `SYS_ADMIN` for the overlay mount and `ip netns add`, `DAC_OVERRIDE` for the
-  root writes into the game-owned volume (including the overlay upper
-  directory), and `SETUID`/`SETGID` to drop to the game user
-- keep `CHOWN` and `NET_ADMIN` off: the volume paths are created as the game
-  user, and the network namespace only needs `SYS_ADMIN`
+  `NET_ADMIN` for the broker's synthetic udev event, `SYS_ADMIN` for the
+  overlay mount and `ip netns add`, `DAC_OVERRIDE` for the root writes into
+  the game-owned volume (including the overlay upper directory), and
+  `SETUID`/`SETGID` to drop to the game user
+- keep `CHOWN` off: the volume paths are created as the game user
+- after startup the entrypoint continues as the game user, and the broker
+  drops to `MKNOD` and `NET_ADMIN`
 - keep `no-new-privileges:true`
 - do not pass `/dev/dri/card*`
 - do not mount the host Wayland/X11 sockets
