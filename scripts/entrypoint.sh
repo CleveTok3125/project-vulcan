@@ -29,13 +29,6 @@ export XDG_CACHE_HOME="/data/home/.cache"
 export XDG_DATA_HOME="/data/home/.local/share"
 export HOME="/data/home"
 
-install -d -m 0755 /data
-# Ownership is applied after the directories exist. `install -o` chowns before
-# it chmods, which needs CAP_FOWNER; the container does not keep that
-# capability.
-install -d -m 0755 \
-    /data/apollo /data/apollo/credentials /data/home /data/log /data/prefix /data/overlay
-install -d -m 0700 "$XDG_RUNTIME_DIR"
 install -d -m 0755 /dev/input /run/udev /run/udev/data /run/udev/rules.d
 install -d -m 0755 "$GAME_PATH"
 if [ ! -e /var/run ] && [ ! -L /var/run ]; then
@@ -44,8 +37,6 @@ fi
 if [ ! -e /run/udev/control ]; then
     touch /run/udev/control
 fi
-chown "$GAME_UID:$GAME_GID" /data "$XDG_RUNTIME_DIR"
-chown -R "$GAME_UID:$GAME_GID" /data/apollo /data/home /data/log /data/prefix /data/overlay
 
 cleanup() {
     kill $(jobs -p) 2>/dev/null || true
@@ -55,20 +46,6 @@ trap cleanup EXIT INT TERM
 INPUT_TRANSPORT="${INPUT_TRANSPORT:-socket}"
 if [ "$INPUT_TRANSPORT" != "socket" ]; then
     die "only INPUT_TRANSPORT=socket is supported"
-fi
-
-if [ "${ENABLE_OVERLAY:-1}" = "1" ]; then
-    if [ ! -d "$GAME_RO_PATH" ]; then
-        die "missing ${GAME_RO_PATH}; mount the host game directory there"
-    fi
-    overlay_dir="/data/overlay/${GAME_ID}"
-    install -d -m 0755 "$overlay_dir" "$overlay_dir/upper" "$overlay_dir/work"
-    chown -R "$GAME_UID:$GAME_GID" /data/overlay
-    if ! mountpoint -q "$GAME_PATH"; then
-        mount -t overlay overlay \
-            -o "lowerdir=${GAME_RO_PATH},upperdir=${overlay_dir}/upper,workdir=${overlay_dir}/work" \
-            "$GAME_PATH" || die "failed to mount overlay for ${GAME_PATH}"
-    fi
 fi
 
 read_gid() {
@@ -106,6 +83,33 @@ as_game_netns() {
         "${SETPRIV_CMD[@]}" "$@"
     fi
 }
+
+# The volume belongs to the game user while the entrypoint runs as root.
+# Create the runtime paths as that user so no chown (CAP_CHOWN) is needed.
+if ! as_game test -w /data; then
+    die "/data is not writable by uid ${GAME_UID}; fix the volume ownership"
+fi
+as_game install -d -m 0755 \
+    /data/apollo /data/apollo/credentials /data/home /data/log /data/prefix /data/overlay
+
+# A tmpfs mount gives the runtime directory the game user's ownership without
+# a chown; sockets only need to live as long as the container.
+install -d -m 0700 "$XDG_RUNTIME_DIR"
+mount -t tmpfs -o "uid=${GAME_UID},gid=${GAME_GID},mode=0700,size=128m" tmpfs "$XDG_RUNTIME_DIR" \
+    || die "failed to mount ${XDG_RUNTIME_DIR}"
+
+if [ "${ENABLE_OVERLAY:-1}" = "1" ]; then
+    if [ ! -d "$GAME_RO_PATH" ]; then
+        die "missing ${GAME_RO_PATH}; mount the host game directory there"
+    fi
+    overlay_dir="/data/overlay/${GAME_ID}"
+    as_game install -d -m 0755 "$overlay_dir" "$overlay_dir/upper" "$overlay_dir/work"
+    if ! mountpoint -q "$GAME_PATH"; then
+        mount -t overlay overlay \
+            -o "lowerdir=${GAME_RO_PATH},upperdir=${overlay_dir}/upper,workdir=${overlay_dir}/work" \
+            "$GAME_PATH" || die "failed to mount overlay for ${GAME_PATH}"
+    fi
+fi
 
 as_game dbus-daemon --session \
     --address="unix:path=${XDG_RUNTIME_DIR}/bus" \
@@ -226,6 +230,11 @@ APOLLO_APP_UUID="${GAME_APP_UUID:-$(derive_app_uuid "$GAME_ID")}"
 APOLLO_APP_CMD="/usr/local/bin/launch-game.sh"
 
 install -d -m 0755 /data/sway
+# Apollo rewrites its config and app list from the web UI, so create the files
+# as the game user before root fills them in.
+as_game sh -c 'rm -f /data/apollo/apps.json /data/apollo/sunshine.conf &&
+    install -m 0644 /dev/null /data/apollo/apps.json &&
+    install -m 0644 /dev/null /data/apollo/sunshine.conf'
 
 render_apollo_apps /config/apollo/apps.json /data/apollo/apps.json \
     "$APOLLO_APP_NAME" "$APOLLO_APP_CMD" "$APOLLO_APP_UUID"
@@ -243,11 +252,10 @@ sed \
     /config/sway/config.in >/data/sway/config
 
 if [ -z "$APOLLO_ADAPTER" ]; then
-    grep -v '^adapter_name = $' /data/apollo/sunshine.conf >/data/apollo/sunshine.conf.tmp
-    mv /data/apollo/sunshine.conf.tmp /data/apollo/sunshine.conf
+    grep -v '^adapter_name = $' /data/apollo/sunshine.conf >/run/sunshine.conf
+    cat /run/sunshine.conf >/data/apollo/sunshine.conf
+    rm -f /run/sunshine.conf
 fi
-
-chown "$GAME_UID:$GAME_GID" /data/apollo/sunshine.conf /data/apollo/apps.json /data/sway/config
 
 log "starting Sway with ${SWAY_BACKENDS} (input: ${INPUT_BACKEND})"
 as_game_netns env \

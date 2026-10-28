@@ -23,10 +23,10 @@ derive_app_uuid() {
 # The template must hold at least one app; its remaining fields are kept.
 render_apollo_apps() {
     local template="$1" output="$2" name="$3" cmd="$4" uuid="$5"
+    # Write in place so an existing file keeps its owner and mode.
     jq --arg name "$name" --arg cmd "$cmd" --arg uuid "$uuid" \
         '.apps[0].name = $name
          | .apps[0].cmd = $cmd
          | .apps[0].uuid = $uuid' \
-        "$template" >"${output}.tmp"
-    mv "${output}.tmp" "$output"
+        "$template" >"$output"
 }
