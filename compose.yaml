@@ -40,6 +40,8 @@ services:
       # The entrypoint creates the volume paths as the game user; only the
       # broker, the mounts, and the privilege drop need capabilities.
       - MKNOD
+      # The broker sends synthetic udev events from its private netns.
+      - NET_ADMIN
       # Required for the overlay mount and for `ip netns add`.
       - SYS_ADMIN
       # Root writes configs and logs into the game-owned volume, and the
