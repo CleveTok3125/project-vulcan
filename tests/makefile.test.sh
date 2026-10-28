@@ -58,6 +58,11 @@ check_contains 'session shell runs as the game user' '--user 1000' "$out"
 check_contains 'session shell sets the runtime dir' 'XDG_RUNTIME_DIR=/run/user/1000' "$out"
 check_contains 'session shell sets the wayland display' 'WAYLAND_DISPLAY=' "$out"
 
+# Uninstall removes the container, its volume, and the image.
+out="$(run_make uninstall CONFIRM=1 ENV_FILE=preset.env)"
+check_contains 'uninstall uses the explicit preset' '--env-file preset.env' "$out"
+check_contains 'uninstall removes the image' 'docker rmi vulcan/game-stream:local' "$out"
+
 # Targets that do not use Compose must work before any configuration exists.
 rm "$workdir/.env.local"
 out="$(run_help)"

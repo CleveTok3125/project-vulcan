@@ -99,7 +99,7 @@ make up ENV_FILE=.env.zzz
 ```
 
 Every target accepts `ENV_FILE`, including `build`, `logs`, `clean`, and
-`reset`. The value is a path relative to the repository root; `.env.local`
+`uninstall`. The value is a path relative to the repository root; `.env.local`
 is the default. Only one container runs at a time, and each `GAME_ID` keeps
 its own volume.
 

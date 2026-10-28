@@ -10,7 +10,7 @@ VOLUME := vulcan_$(GAME_ID)-data
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build up rebuild stop down restart logs ps config clean reset stats usage btop nvtop shell watch
+.PHONY: help build up rebuild stop down restart logs ps config clean uninstall stats usage btop nvtop shell watch
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -76,6 +76,7 @@ clean: ## Remove game session data; keep prefix and Apollo state
 	docker run --rm -v $(VOLUME):/data --entrypoint sh $(IMAGE) -c 'rm -rf /data/overlay/$(GAME_ID)/upper/* /data/overlay/$(GAME_ID)/work/* /data/prefix/drive_c/users/*/AppData /data/prefix/.vulcan-reset-paths /data/log/*'
 	$(COMPOSE) up -d
 
-reset: ## Remove container and all data; requires CONFIRM=1
-	@test "$(CONFIRM)" = "1" || { printf '%s\n' 'Refusing reset: run make reset CONFIRM=1'; exit 1; }
+uninstall: ## Remove the container, its data, and the image; requires CONFIRM=1
+	@test "$(CONFIRM)" = "1" || { printf '%s\n' 'Refusing uninstall: run make uninstall CONFIRM=1'; exit 1; }
 	$(COMPOSE) down -v
+	docker rmi $(IMAGE)
