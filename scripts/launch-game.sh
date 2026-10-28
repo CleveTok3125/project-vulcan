@@ -60,20 +60,27 @@ fi
 
 cd "$(dirname "$GAME_EXE")"
 
-runner=()
-if [ -x "$WINE_ROOT/bin/wine64" ]; then
-    runner=("$WINE_ROOT/bin/wine64" "$GAME_EXE")
-else
-    printf '[vulcan] wine64 not found under WINE_ROOT: %s\n' "$WINE_ROOT" >&2
+# Wine 11 ships one loader named `wine`; Spritz and Proton trees keep `wine64`.
+wine_bin=""
+for loader in wine64 wine; do
+    if [ -x "$WINE_ROOT/bin/${loader}" ]; then
+        wine_bin="$WINE_ROOT/bin/${loader}"
+        break
+    fi
+done
+if [ -z "$wine_bin" ]; then
+    printf '[vulcan] wine loader not found under %s/bin\n' "$WINE_ROOT" >&2
     exit 1
 fi
+
+runner=("$wine_bin" "$GAME_EXE")
 
 # The prefix lives in the container volume. A fresh volume starts empty, so
 # create the default Wine prefix here instead of shipping one in the image.
 if [ ! -d "$WINEPREFIX/drive_c/windows/system32" ]; then
     printf '[vulcan] initializing Wine prefix: %s\n' "$WINEPREFIX" >&2
     WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml=" \
-        "$WINE_ROOT/bin/wine64" wineboot --init \
+        "$wine_bin" wineboot --init \
         || {
             printf '[vulcan] Wine prefix initialization failed: %s\n' "$WINEPREFIX" >&2
             exit 1

@@ -13,7 +13,7 @@ Docker (rootful)
 └─ game container
    ├─ Sway HEADLESS-1 1920x1080@144
    ├─ gamescope (nested Wayland client, optional)
-   │  └─ wine64 + game
+   │  └─ wine + game
    ├─ Apollo (capture=wlr, NVENC)
    ├─ PipeWire null sink
    └─ input broker (event nodes -> private /dev/input)
@@ -38,11 +38,13 @@ which is not available in this container.
   userland libraries, so no NVIDIA Container Toolkit is needed.
 - A host user with access to the Docker daemon.
 - Game files available under a host directory that can be mounted read-only.
-- Spritz-Wine-TkG or a Proton tree available on the host under `SPRITZ_DIR`;
-  it is mounted read-only at `/data/spritz-wine-tkg`.
+- Spritz-Wine-TkG, a Proton tree, or a distribution Wine tree available on
+  the host under `SPRITZ_DIR`; it is mounted read-only at
+  `/data/spritz-wine-tkg`.
 - A writable Wine prefix under `/data/prefix`; the container creates it on
   the first game launch.
-- `WINE_ROOT` points at a Wine tree with `bin/wine64`.
+- `WINE_ROOT` points at a Wine tree with `bin/wine64` or, for Wine 11 and
+  later, `bin/wine`.
 
 ### Groups
 
@@ -283,7 +285,8 @@ Defaults:
 - Sway: `HEADLESS-1`, `1920x1080@144`.
 - gamescope: `--backend wayland`, fullscreen, 1920x1080@144.
 - Game executable: `GAME_EXE` from the selected env file.
-- Wine: `/data/spritz-wine-tkg/bin/wine64`, with `UMU_USE_STEAM=1`.
+- Wine: `/data/spritz-wine-tkg/bin/wine64` or `/data/spritz-wine-tkg/bin/wine`,
+  with `UMU_USE_STEAM=1`.
 
 ### Wine environment
 

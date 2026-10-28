@@ -65,6 +65,24 @@ run_launch 2>"$workdir/second.log"
 check 'second launch skips wineboot' '0' "$(grep -c '^wineboot --init$' "$wine_log")"
 check 'second launch starts game' '1' "$(grep -cx -- "$game_exe" "$wine_log")"
 
+# Wine 11 ships a single `wine` loader; a tree without wine64 still runs.
+wine_only_root="$workdir/wine-unified"
+mkdir -p "$wine_only_root/bin"
+cp "$fake_root/bin/wine64" "$wine_only_root/bin/wine"
+: >"$wine_log"
+run_launch WINE_ROOT="$wine_only_root" 2>"$workdir/wine-unified.log"
+check 'unified wine loader starts game' '1' "$(grep -cx -- "$game_exe" "$wine_log")"
+
+# A tree without any loader aborts the launch.
+: >"$wine_log"
+set +e
+run_launch WINE_ROOT="$workdir/wine-empty" 2>"$workdir/wine-missing.log"
+status=$?
+set -e
+check 'missing wine loader exits non-zero' 'yes' "$([ "$status" -ne 0 ] && printf yes || printf no)"
+check 'missing wine loader is reported' '1' "$(grep -c 'wine loader not found' "$workdir/wine-missing.log")"
+check 'missing wine loader does not start game' '0' "$(grep -c -- "$game_exe" "$wine_log")"
+
 # DXVK_HUD passes through when set.
 : >"$wine_log"
 run_launch DXVK_HUD=fps 2>"$workdir/hud.log"
