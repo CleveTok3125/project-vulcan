@@ -311,7 +311,9 @@ impl Backend {
     }
 
     fn dispatch_events(&mut self) {
-        loop {
+        // A disconnect or device removal resets the context mid-loop; reading
+        // further events then would pass a null pointer to libei.
+        while !self.context.is_null() {
             let event = unsafe { ei_get_event(self.context) };
             if event.is_null() {
                 break;
