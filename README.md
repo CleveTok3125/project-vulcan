@@ -105,33 +105,6 @@ Every target accepts `ENV_FILE`, including `build`, `logs`, `clean`, and
 is the default. Only one container runs at a time, and each `GAME_ID` keeps
 its own volume.
 
-Example:
-
-```dotenv
-GAME_DIR=/srv/games/zzz
-GAME_ID=zzz
-GAME_APP_NAME=Zenless Zone Zero
-GAME_APP_UUID=
-GAME_RESET_PATHS=ZenlessZoneZero_Data/Persistent/LocalStorage:ZenlessZoneZero_Data/SDKCaches/HoYoPass
-GAME_EXE=/games/zzz/ZenlessZoneZero.exe
-SPRITZ_DIR=/path/to/spritz-wine-tkg
-GID_INPUT=993
-GID_RENDER=992
-GID_VIDEO=986
-APOLLO_PKG=apollo-git
-APOLLO_COMMIT=adc5c5a0bd80831ce495434bb16aee2cd4175fb8
-APOLLO_ENCODER=nvenc
-APOLLO_ADAPTER=
-APOLLO_NAME=Vulcan-ZZZ
-APOLLO_PORT=47989
-GAMESCOPE_FORCE_WINDOWS_FULLSCREEN=1
-GAMESCOPE_GRAB_CURSOR=1
-GAMESCOPE_HIDE_CURSOR_DELAY=86400000
-GAMESCOPE_TOUCH_MODE=4
-INPUT_GAMEPAD=1
-UMU_USE_STEAM=1
-```
-
 `GAME_ID`, `GAME_DIR`, `GAME_EXE`, `RENDER_NODE`, and `SPRITZ_DIR` are
 required. `GAME_DIR` is mounted at `/games-ro/<GAME_ID>`; `GAME_EXE` is the
 executable path inside the writable overlay view at `/games/<GAME_ID>`.
