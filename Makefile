@@ -10,10 +10,10 @@ VOLUME := vulcan_$(GAME_ID)-data
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build up rebuild stop down restart logs ps config clean uninstall stats usage btop nvtop shell watch
+.PHONY: help build up rebuild stop down restart logs ps config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
 
 help: ## Show available targets
-	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 	@printf '\nENV_FILE selects the configuration preset (default: .env.local).\n'
 
 build: ## Build the container image
@@ -71,9 +71,30 @@ watch: ## Refresh container usage every 2 seconds
 config: ## Validate and print the resolved compose config
 	$(COMPOSE) config
 
-clean: ## Reset the game overlay, AppData, logs, and reset marker
+CLEAN_LOGS := /data/log/*
+CLEAN_OVERLAY := /data/overlay/$(GAME_ID)/upper/* /data/overlay/$(GAME_ID)/work/* /data/prefix/.vulcan-reset-paths
+CLEAN_APPDATA := /data/prefix/drive_c/users/*/AppData
+
+clean-logs: ## Remove the session logs
+clean-logs: CLEAN_PATHS := $(CLEAN_LOGS)
+clean-logs: _clean-session
+
+clean-overlay: ## Remove the game overlay and reset marker
+clean-overlay: CLEAN_PATHS := $(CLEAN_OVERLAY)
+clean-overlay: _clean-session
+
+clean-appdata: ## Remove the prefix AppData
+clean-appdata: CLEAN_PATHS := $(CLEAN_APPDATA)
+clean-appdata: _clean-session
+
+clean-all: ## Remove logs, overlay, reset marker, and prefix AppData
+clean-all: CLEAN_PATHS := $(CLEAN_LOGS) $(CLEAN_OVERLAY) $(CLEAN_APPDATA)
+clean-all: _clean-session
+
+_clean-session:
+	@set -f; printf '[vulcan] removing:\n'; printf '  %s\n' $(CLEAN_PATHS)
 	$(COMPOSE) down
-	docker run --rm -v $(VOLUME):/data --entrypoint sh $(IMAGE) -c 'rm -rf /data/overlay/$(GAME_ID)/upper/* /data/overlay/$(GAME_ID)/work/* /data/prefix/drive_c/users/*/AppData /data/prefix/.vulcan-reset-paths /data/log/*'
+	docker run --rm -v $(VOLUME):/data --entrypoint sh $(IMAGE) -c 'set -e; rm -rf $(CLEAN_PATHS)'
 	$(COMPOSE) up -d
 
 uninstall: ## Remove the container, its data, and the image; requires CONFIRM=1

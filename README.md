@@ -344,13 +344,21 @@ game-relative paths to remove once per prefix; removals land in the overlay
 upper layer and the host files stay untouched. Setting it on an existing
 prefix applies at the next launch.
 
-`make clean` resets the container's view of the game tree. It stops the
-container, deletes the overlay upper and work directories, the per-user
-`AppData` directories in the prefix, the logs, and the reset marker, then
-starts the container again. The Wine prefix and Apollo state stay in the
-volume; the next launch reads the host tree again and reapplies
-`GAME_RESET_PATHS`. Use it after the host changes files the container had
-already written, since the overlay keeps the container's copy until it is
+Session cleanup targets remove parts of the volume and keep the Wine prefix
+and Apollo state:
+
+| Target | Removes |
+| --- | --- |
+| `make clean-logs` | `/data/log/*` |
+| `make clean-overlay` | `/data/overlay/<GAME_ID>/{upper,work}/*` and `/data/prefix/.vulcan-reset-paths` |
+| `make clean-appdata` | `/data/prefix/drive_c/users/*/AppData` |
+| `make clean-all` | all of the above |
+
+Each target stops the container, removes its paths, and starts the container
+again. `clean-overlay` also drops the reset marker: the fresh overlay no longer
+holds the whiteouts from the previous `GAME_RESET_PATHS` run, so the next
+launch applies them again. Use it after the host changes files the container
+had already written, since the overlay keeps the container's copy until it is
 removed.
 
 The overlay mount requires `CAP_SYS_ADMIN`, which is granted to the entrypoint.
@@ -359,8 +367,8 @@ The game runs as a non-root user without that capability.
 To update the game, stop the container and run the updater/launcher outside
 the streaming container, or start a separate maintenance container with a
 read-write mount. Do not expose a read-write game directory while streaming.
-Run `make clean` afterwards so the container stops using the copies it wrote
-into its overlay and reads the updated tree.
+Run `make clean-overlay` afterwards so the container stops using the copies it
+wrote into its overlay and reads the updated tree.
 
 ## Input
 

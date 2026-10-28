@@ -43,14 +43,46 @@ run_help() {
 # The default configuration file keeps working without arguments.
 out="$(run_make up)"
 check_contains 'default env file' '--env-file .env.local' "$out"
-check_contains 'default volume' 'vulcan_zzz-data' "$(run_make clean)"
+check_contains 'default volume' 'vulcan_zzz-data' "$(run_make clean-logs)"
 
 # An explicit file replaces the default for every target.
 out="$(run_make up ENV_FILE=preset.env)"
 check_contains 'explicit env file' '--env-file preset.env' "$out"
 check_missing 'explicit env file replaces default' '--env-file .env.local' "$out"
-check_contains 'explicit preset volume' 'vulcan_demo-data' "$(run_make clean ENV_FILE=preset.env)"
+check_contains 'explicit preset volume' 'vulcan_demo-data' "$(run_make clean-overlay ENV_FILE=preset.env)"
 check_contains 'explicit preset compose down' '--env-file preset.env' "$(run_make down ENV_FILE=preset.env)"
+
+# Cleanup targets remove only their own paths.
+out="$(run_make clean-logs)"
+check_contains 'clean-logs removes log files' '/data/log/*' "$out"
+check_missing 'clean-logs keeps the overlay' '/data/overlay' "$out"
+check_missing 'clean-logs keeps AppData' 'AppData' "$out"
+
+out="$(run_make clean-overlay)"
+check_contains 'clean-overlay removes overlay upper' '/data/overlay/zzz/upper' "$out"
+check_contains 'clean-overlay removes overlay work' '/data/overlay/zzz/work' "$out"
+check_contains 'clean-overlay removes the reset marker' '.vulcan-reset-paths' "$out"
+check_missing 'clean-overlay keeps the logs' '/data/log' "$out"
+check_missing 'clean-overlay keeps AppData' 'AppData' "$out"
+
+out="$(run_make clean-appdata)"
+check_contains 'clean-appdata removes AppData' 'drive_c/users/*/AppData' "$out"
+check_missing 'clean-appdata keeps the overlay' '/data/overlay' "$out"
+check_missing 'clean-appdata keeps the logs' '/data/log' "$out"
+
+out="$(run_make clean-all)"
+check_contains 'clean-all removes logs' '/data/log/*' "$out"
+check_contains 'clean-all removes the overlay' '/data/overlay/zzz/upper' "$out"
+check_contains 'clean-all removes the reset marker' '.vulcan-reset-paths' "$out"
+check_contains 'clean-all removes AppData' 'drive_c/users/*/AppData' "$out"
+
+# The bare clean target is gone.
+if (cd "$workdir" && make --no-print-directory -n clean >/dev/null 2>&1); then
+    printf 'FAIL bare clean target is gone: it still exists\n' >&2
+    failures=$((failures + 1))
+else
+    printf 'ok   bare clean target is gone\n'
+fi
 
 # The session shell runs outside Compose and sets the session environment.
 out="$(run_make shell)"
