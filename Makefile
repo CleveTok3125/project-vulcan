@@ -8,6 +8,11 @@ IMAGE := vulcan/game-stream:local
 CONTAINER := vulcan-game
 VOLUME := vulcan_$(GAME_ID)-data
 
+# Show the selected preset once per invocation; `watch` calls make in a loop.
+ifeq ($(MAKELEVEL),0)
+$(info [vulcan] ENV_FILE=$(ENV_FILE)$(if $(wildcard $(ENV_FILE)),, (missing)))
+endif
+
 .DEFAULT_GOAL := help
 
 .PHONY: help build up rebuild stop down restart logs ps config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch

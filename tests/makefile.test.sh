@@ -43,14 +43,20 @@ run_help() {
 # The default configuration file keeps working without arguments.
 out="$(run_make up)"
 check_contains 'default env file' '--env-file .env.local' "$out"
+check_contains 'default preset is reported' '[vulcan] ENV_FILE=.env.local' "$out"
 check_contains 'default volume' 'vulcan_zzz-data' "$(run_make clean-logs)"
 
 # An explicit file replaces the default for every target.
 out="$(run_make up ENV_FILE=preset.env)"
 check_contains 'explicit env file' '--env-file preset.env' "$out"
+check_contains 'explicit preset is reported' '[vulcan] ENV_FILE=preset.env' "$out"
 check_missing 'explicit env file replaces default' '--env-file .env.local' "$out"
 check_contains 'explicit preset volume' 'vulcan_demo-data' "$(run_make clean-overlay ENV_FILE=preset.env)"
 check_contains 'explicit preset compose down' '--env-file preset.env' "$(run_make down ENV_FILE=preset.env)"
+
+# A missing preset is marked in the report.
+out="$(run_make up ENV_FILE=absent.env)"
+check_contains 'missing preset is marked' '[vulcan] ENV_FILE=absent.env (missing)' "$out"
 
 # Cleanup targets remove only their own paths.
 out="$(run_make clean-logs)"

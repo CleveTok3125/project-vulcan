@@ -100,10 +100,12 @@ $EDITOR .env.zzz
 make up ENV_FILE=.env.zzz
 ```
 
-Every target accepts `ENV_FILE`, including `build`, `logs`, `clean`, and
+Every target accepts `ENV_FILE`, including `build`, `logs`, `clean-*`, and
 `uninstall`. The value is a path relative to the repository root; `.env.local`
 is the default. Only one container runs at a time, and each `GAME_ID` keeps
-its own volume.
+its own volume. Each target prints the selected file, for example
+`[vulcan] ENV_FILE=.env.zzz`, and marks it as `(missing)` when it does not
+exist.
 
 `GAME_ID`, `GAME_DIR`, `GAME_EXE`, `RENDER_NODE`, and `SPRITZ_DIR` are
 required. `GAME_DIR` is mounted at `/games-ro/<GAME_ID>`; `GAME_EXE` is the
