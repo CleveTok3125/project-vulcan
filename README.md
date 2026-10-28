@@ -401,6 +401,16 @@ Sway runs with `WLR_BACKENDS=headless,libinput` and libseat's `noop` backend.
 input reaches the game through gamescope, so Sway itself has no pointer device
 and does not draw the streamed cursor.
 
+### Multi-touch
+
+The shim forwards the `ABS_MT` sequence from Apollo's touch device and
+`vulcan-inputd` maps each contact to a libei touch. Contacts do not reach the
+game yet: gamescope 3.17 leaves `EIS_DEVICE_CAP_TOUCH` disabled in
+`src/InputEmulation.cpp` and logs `No touch support yet` for touch events. The
+forwarding path becomes active once gamescope advertises the capability; until
+then keep the client in a mouse mode, where touch arrives as absolute mouse
+events.
+
 `INPUT_BACKEND=xtest` falls back to `input-bridge.py`, which grabs the event
 nodes with `EVIOCGRAB` and injects them into gamescope's Xwayland display with
 XTest. With gamescope enabled the bridge targets `:2`; without gamescope it
@@ -459,6 +469,8 @@ Additional hardening:
 - gamescope adds a second compositor. Disable it if latency or frame pacing is
   worse.
 - Docker AppArmor may block `mknod`; test or install a custom profile.
+- Multi-touch does not reach the game: gamescope 3.17 has no EIS touch
+  capability.
 
 ## Validation checklist
 
