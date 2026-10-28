@@ -2,6 +2,6 @@
 .trash/
 .env
 .env.*
-!.env.example
+!.env.zzz.example
 data/
 *.log

@@ -78,8 +78,11 @@ Update these together when intentionally upgrading the image.
 
 ## Configuration
 
+The `.env.zzz.example` preset describes one game on one host, with the
+host-specific lines marked.
+
 ```bash
-cp .env.example .env.local
+cp .env.zzz.example .env.local
 $EDITOR .env.local
 ```
 
@@ -92,8 +95,7 @@ docker compose --env-file .env.local -f compose.yaml -f compose.nvidia.yaml up -
 Keep one file per game or host profile and select it with `ENV_FILE`:
 
 ```bash
-cp .env.example .env.zzz
-cp .env.example .env.demo
+cp .env.zzz.example .env.zzz
 $EDITOR .env.zzz
 make up ENV_FILE=.env.zzz
 ```
@@ -152,7 +154,7 @@ make down
 make up ENV_FILE=.env.demo
 ```
 
-Create the preset with `cp .env.example .env.demo` and set `GAME_ID`,
+Create the preset with `cp .env.zzz.example .env.demo` and set `GAME_ID`,
 `GAME_DIR`, `GAME_EXE`, and `GAME_APP_NAME` as described above.
 
 The new game gets its own volume, so its Wine prefix and overlay writes stay
@@ -194,7 +196,7 @@ The `make` targets pass `compose.nvidia.yaml`; on AMD/Intel hosts use the raw
 3. Create the local configuration:
 
    ```bash
-   cp .env.example .env.local
+   cp .env.zzz.example .env.local
    $EDITOR .env.local
    make config
    ```
