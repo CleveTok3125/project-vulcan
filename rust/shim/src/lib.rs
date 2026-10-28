@@ -6,8 +6,8 @@ use std::sync::{Mutex, OnceLock};
 
 use vulcan_input_proto::{
     Event, BTN_MISC, BTN_TASK, EV_ABS, EV_KEY, EV_REL, EV_SYN, KIND_GAMEPAD, KIND_KEYBOARD,
-    KIND_MOUSE, KIND_MOUSE_ABSOLUTE, KIND_PASSTHROUGH, KIND_PEN, KIND_TOUCH, ABS_X, ABS_Y,
-    REL_HWHEEL, REL_WHEEL, REL_X, REL_Y, SYN_REPORT,
+    KIND_MOUSE, KIND_MOUSE_ABSOLUTE, KIND_PASSTHROUGH, KIND_PEN, KIND_TOUCH, ABS_MT_POSITION_X,
+    ABS_MT_POSITION_Y, ABS_X, ABS_Y, REL_HWHEEL, REL_WHEEL, REL_X, REL_Y, SYN_REPORT, TOUCH_RANGE,
 };
 
 #[repr(C)]
@@ -385,7 +385,15 @@ pub unsafe extern "C" fn libevdev_uinput_write_event(
         };
     }
 
-    if fake.kind == KIND_TOUCH || fake.kind == KIND_PEN {
+    if fake.kind == KIND_TOUCH {
+        let event = touch_event(fake, event_type, code, value);
+        if matches!(event.event_type, EV_SYN | EV_KEY | EV_ABS) {
+            send_event(event);
+        }
+        return 0;
+    }
+
+    if fake.kind == KIND_PEN {
         return 0;
     }
 
@@ -418,6 +426,36 @@ pub unsafe extern "C" fn libevdev_uinput_write_event(
     0
 }
 
+/// Converts a touch axis value to the wire range.
+///
+/// The protocol is resolution independent, so slot, tracking id, pressure and
+/// orientation values pass through unchanged with `maximum` of zero.
+fn scale_touch(value: i32, maximum: i32) -> i32 {
+    if maximum <= 0 {
+        return value;
+    }
+    let value = i64::from(value).clamp(0, i64::from(maximum));
+    (value * i64::from(TOUCH_RANGE) / i64::from(maximum)) as i32
+}
+
+fn touch_event(fake: &Fake, event_type: c_uint, code: c_uint, value: c_int) -> Event {
+    let mut value = value;
+    if event_type as u16 == EV_ABS {
+        let maximum = match code as u16 {
+            ABS_X | ABS_MT_POSITION_X => fake.abs_max_x,
+            ABS_Y | ABS_MT_POSITION_Y => fake.abs_max_y,
+            _ => 0,
+        };
+        value = scale_touch(value, maximum);
+    }
+    Event {
+        kind: fake.kind,
+        event_type: event_type as u16,
+        code: code as u16,
+        value,
+    }
+}
+
 fn screen_size() -> (i32, i32) {
     let width = std::env::var("GAME_WIDTH")
         .ok()
@@ -442,3 +480,24 @@ static _TYPE_CHECKS: [u16; 10] = [
 static _BUTTONS: [u16; 2] = [BTN_MISC, BTN_TASK];
 #[used]
 static _EXTRA: [u16; 1] = [REL_HWHEEL];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn touch_axes_scale_to_wire_range() {
+        assert_eq!(scale_touch(0, 19200), 0);
+        assert_eq!(scale_touch(19200, 19200), TOUCH_RANGE);
+        assert_eq!(scale_touch(9600, 19200), TOUCH_RANGE / 2);
+        assert_eq!(scale_touch(10800, 10800), TOUCH_RANGE);
+    }
+
+    #[test]
+    fn touch_axes_clamp_and_pass_through() {
+        assert_eq!(scale_touch(-5, 19200), 0);
+        assert_eq!(scale_touch(20000, 19200), TOUCH_RANGE);
+        assert_eq!(scale_touch(2, 0), 2);
+        assert_eq!(scale_touch(-1, 0), -1);
+    }
+}

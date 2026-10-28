@@ -1,3 +1,5 @@
+mod touch;
+
 use std::ffi::{c_char, c_int, c_void, CString};
 use std::io::{self, Read};
 use std::os::raw::c_uint;
@@ -25,6 +27,7 @@ const EI_EVENT_DEVICE_RESUMED: c_int = 8;
 const EI_DEVICE_CAP_POINTER: c_uint = 1 << 0;
 const EI_DEVICE_CAP_POINTER_ABSOLUTE: c_uint = 1 << 1;
 const EI_DEVICE_CAP_KEYBOARD: c_uint = 1 << 2;
+const EI_DEVICE_CAP_TOUCH: c_uint = 1 << 3;
 const EI_DEVICE_CAP_SCROLL: c_uint = 1 << 4;
 const EI_DEVICE_CAP_BUTTON: c_uint = 1 << 5;
 
@@ -61,6 +64,10 @@ struct ei_seat {
 struct ei_device {
     _private: [u8; 0],
 }
+#[repr(C)]
+struct ei_touch {
+    _private: [u8; 0],
+}
 
 #[link(name = "ei")]
 extern "C" {
@@ -83,6 +90,12 @@ extern "C" {
     fn ei_device_button_button(device: *mut ei_device, button: u32, is_press: bool);
     fn ei_device_scroll_discrete(device: *mut ei_device, x: i32, y: i32);
     fn ei_device_keyboard_key(device: *mut ei_device, key: u32, is_press: bool);
+    fn ei_device_has_capability(device: *mut ei_device, capability: c_uint) -> bool;
+    fn ei_device_touch_new(device: *mut ei_device) -> *mut ei_touch;
+    fn ei_touch_down(touch: *mut ei_touch, x: f64, y: f64);
+    fn ei_touch_motion(touch: *mut ei_touch, x: f64, y: f64);
+    fn ei_touch_up(touch: *mut ei_touch);
+    fn ei_touch_unref(touch: *mut ei_touch);
     fn ei_now(context: *mut ei) -> u64;
     fn ei_unref(context: *mut ei);
 }
@@ -97,6 +110,9 @@ struct Backend {
     last_wait_log: Option<Instant>,
     absolute_x: i32,
     absolute_y: i32,
+    touch_capable: bool,
+    touches: [*mut ei_touch; touch::MAX_SLOTS],
+    tracker: touch::Tracker,
     gamepad: GamepadState,
     gamepad_path: PathBuf,
 }
@@ -118,6 +134,9 @@ impl Backend {
             last_wait_log: None,
             absolute_x: 0,
             absolute_y: 0,
+            touch_capable: false,
+            touches: [std::ptr::null_mut(); touch::MAX_SLOTS],
+            tracker: touch::Tracker::new(),
             gamepad: GamepadState {
                 magic: GAMEPAD_MAGIC,
                 sequence: 0,
@@ -160,6 +179,7 @@ impl Backend {
     }
 
     fn reset(&mut self) {
+        self.release_touches();
         if !self.device.is_null() {
             unsafe { ei_device_unref(self.device) };
             self.device = std::ptr::null_mut();
@@ -170,6 +190,18 @@ impl Backend {
         }
         self.emulating = false;
         self.last_pump = None;
+        self.tracker = touch::Tracker::new();
+    }
+
+    /// Drops the touch objects owned by the current EIS device.
+    fn release_touches(&mut self) {
+        for touch in &mut self.touches {
+            if !touch.is_null() {
+                unsafe { ei_touch_unref(*touch) };
+                *touch = std::ptr::null_mut();
+            }
+        }
+        self.touch_capable = false;
     }
 
     fn ready(&self) -> bool {
@@ -290,6 +322,7 @@ impl Backend {
                                 seat,
                                 EI_DEVICE_CAP_POINTER,
                                 EI_DEVICE_CAP_POINTER_ABSOLUTE,
+                                EI_DEVICE_CAP_TOUCH,
                                 EI_DEVICE_CAP_BUTTON,
                                 EI_DEVICE_CAP_SCROLL,
                                 EI_DEVICE_CAP_KEYBOARD,
@@ -303,6 +336,8 @@ impl Backend {
                         let device = unsafe { ei_event_get_device(event) };
                         if !device.is_null() {
                             self.device = unsafe { ei_device_ref(device) };
+                            self.touch_capable =
+                                unsafe { ei_device_has_capability(device, EI_DEVICE_CAP_TOUCH) };
                         }
                     }
                     self.start_emulating();
@@ -340,7 +375,11 @@ impl Backend {
     }
 
     fn handle(&mut self, event: Event) {
-        if event.kind == KIND_TOUCH || event.kind == KIND_PEN {
+        if event.kind == KIND_PEN {
+            return;
+        }
+        if event.kind == KIND_TOUCH {
+            self.handle_touch(event);
             return;
         }
         if event.kind == KIND_GAMEPAD {
@@ -406,6 +445,51 @@ impl Backend {
                 _ => {}
             },
             _ => {}
+        }
+    }
+
+    /// Applies one touch event and sends the completed libei frame.
+    fn handle_touch(&mut self, event: Event) {
+        if !self.touch_capable || !self.ensure_connected() {
+            return;
+        }
+        let device = self.device;
+        if device.is_null() {
+            return;
+        }
+
+        let mut actions = Vec::new();
+        self.tracker.feed(event, &mut actions);
+        for action in actions {
+            match action {
+                touch::TouchAction::Down { slot, x, y } => {
+                    let new_touch = unsafe { ei_device_touch_new(device) };
+                    if !new_touch.is_null() {
+                        unsafe { ei_touch_down(new_touch, x, y) };
+                        self.touches[slot] = new_touch;
+                    }
+                }
+                touch::TouchAction::Motion { slot, x, y } => {
+                    let active = self.touches[slot];
+                    if !active.is_null() {
+                        unsafe { ei_touch_motion(active, x, y) };
+                    }
+                }
+                touch::TouchAction::Up { slot } => {
+                    let finished =
+                        std::mem::replace(&mut self.touches[slot], std::ptr::null_mut());
+                    if !finished.is_null() {
+                        unsafe {
+                            ei_touch_up(finished);
+                            ei_touch_unref(finished);
+                        }
+                    }
+                }
+            }
+        }
+
+        if event.event_type == EV_SYN && event.code == SYN_REPORT {
+            self.frame();
         }
     }
 }

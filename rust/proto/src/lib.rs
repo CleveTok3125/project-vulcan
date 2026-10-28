@@ -25,6 +25,18 @@ pub const ABS_RY: u16 = 4;
 pub const ABS_RZ: u16 = 5;
 pub const ABS_HAT0X: u16 = 0x10;
 pub const ABS_HAT0Y: u16 = 0x11;
+pub const ABS_MT_SLOT: u16 = 0x2f;
+pub const ABS_MT_POSITION_X: u16 = 0x35;
+pub const ABS_MT_POSITION_Y: u16 = 0x36;
+pub const ABS_MT_TRACKING_ID: u16 = 0x39;
+pub const BTN_TOUCH: u16 = 0x14a;
+
+/// Wire range for touch coordinates.
+///
+/// The shim converts the device axes to this range so the protocol stays
+/// independent of the touch device resolution.
+pub const TOUCH_RANGE: i32 = 65535;
+
 pub const BTN_MISC: u16 = 0x100;
 pub const BTN_TASK: u16 = 0x117;
 pub const BTN_SOUTH: u16 = 0x130;
