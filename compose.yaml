@@ -44,6 +44,10 @@ services:
       - NET_ADMIN
       # Required for the overlay mount and for `ip netns add`.
       - SYS_ADMIN
+      # Overlayfs copy-up runs with the credentials of the process that
+      # mounted the overlay. Without CHOWN, writes to paths that exist only
+      # in the read-only lower layer fail with EPERM on a fresh volume.
+      - CHOWN
       # Root writes configs and logs into the game-owned volume, and the
       # overlay mount needs write access to its upper directory.
       - DAC_OVERRIDE

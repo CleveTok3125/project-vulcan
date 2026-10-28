@@ -488,10 +488,12 @@ Additional hardening:
 - keep `cap_drop: ALL`
 - add only what the entrypoint needs: `MKNOD` for the input broker,
   `NET_ADMIN` for the broker's synthetic udev event, `SYS_ADMIN` for the
-  overlay mount and `ip netns add`, `DAC_OVERRIDE` for the root writes into
+  overlay mount and `ip netns add`, `CHOWN` for the overlayfs copy-up done
+  with the mounter's credentials, `DAC_OVERRIDE` for the root writes into
   the game-owned volume (including the overlay upper directory), and
   `SETUID`/`SETGID` to drop to the game user
-- keep `CHOWN` off: the volume paths are created as the game user
+- keep the game process unprivileged: it receives no capabilities, and
+  `CHOWN` only applies to the overlay mount created by the entrypoint
 - after startup the entrypoint continues as the game user, and the broker
   drops to `MKNOD` and `NET_ADMIN`
 - keep `no-new-privileges:true`
