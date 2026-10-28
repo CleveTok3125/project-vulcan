@@ -13,6 +13,7 @@ created by inputtino. Extra names can be added with INPUT_EXTRA_NAMES.
 
 from __future__ import annotations
 
+import ctypes
 import os
 import socket
 import stat
@@ -27,6 +28,43 @@ UDEV_GROUP = 2
 MAJOR_INPUT = 13
 POLL_SECONDS = 0.25
 SEQNUM = 0
+
+CAP_NET_ADMIN = 12
+CAP_MKNOD = 27
+CAP_EFFECTIVE = 0
+CAP_PERMITTED = 1
+CAP_SET = 1
+
+
+def restrict_capabilities() -> None:
+    """Drop every capability except MKNOD and NET_ADMIN.
+
+    MKNOD creates the event nodes; NET_ADMIN lets the broker send the
+    synthetic uevent in its own network namespace. Dropping capabilities does
+    not require CAP_SETPCAP.
+    """
+    libcap = ctypes.CDLL("libcap.so.2", use_errno=True)
+    libcap.cap_init.restype = ctypes.c_void_p
+    libcap.cap_set_flag.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.POINTER(ctypes.c_int),
+        ctypes.c_int,
+    ]
+    libcap.cap_set_flag.restype = ctypes.c_int
+    libcap.cap_set_proc.argtypes = [ctypes.c_void_p]
+    libcap.cap_set_proc.restype = ctypes.c_int
+
+    capabilities = libcap.cap_init()
+    if not capabilities:
+        raise OSError(ctypes.get_errno(), "cap_init")
+    values = (ctypes.c_int * 2)(CAP_NET_ADMIN, CAP_MKNOD)
+    for flag in (CAP_PERMITTED, CAP_EFFECTIVE):
+        if libcap.cap_set_flag(capabilities, flag, len(values), values, CAP_SET) != 0:
+            raise OSError(ctypes.get_errno(), "cap_set_flag")
+    if libcap.cap_set_proc(capabilities) != 0:
+        raise OSError(ctypes.get_errno(), "cap_set_proc")
 
 TARGETS = {
     "Mouse passthrough": "mouse",
@@ -153,6 +191,12 @@ def expose(event: str, device_type: str, input_gid: int) -> bool:
 
 
 def main() -> int:
+    try:
+        restrict_capabilities()
+    except OSError as error:
+        print(f"failed to restrict capabilities: {error}", flush=True)
+        return 1
+    print("capabilities restricted to mknod, net_admin", flush=True)
     ensure_runtime_dirs()
     input_gid = int(os.environ.get("INPUT_GID", "0"))
     extra_names = {
