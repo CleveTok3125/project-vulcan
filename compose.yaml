@@ -37,16 +37,16 @@ services:
     cap_drop:
       - ALL
     cap_add:
-      # Required to create event nodes for Apollo's uinput devices.
+      # The entrypoint creates the volume paths as the game user; only the
+      # broker, the mounts, and the privilege drop need capabilities.
       - MKNOD
-      # Required only when ENABLE_OVERLAY=1. Remove it if overlay is disabled.
+      # Required for the overlay mount and for `ip netns add`.
       - SYS_ADMIN
-      # The entrypoint prepares /data before dropping to the game user.
-      - CHOWN
+      # Root writes configs and logs into the game-owned volume, and the
+      # overlay mount needs write access to its upper directory.
       - DAC_OVERRIDE
       - SETUID
       - SETGID
-      - NET_ADMIN
 
     security_opt:
       - no-new-privileges:true
