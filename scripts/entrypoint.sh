@@ -76,14 +76,6 @@ as_game() {
     "${SETPRIV_CMD[@]}" "$@"
 }
 
-as_game_netns() {
-    if [ -n "$INPUT_NETNS" ]; then
-        ip netns exec "$INPUT_NETNS" "${SETPRIV_CMD[@]}" "$@"
-    else
-        "${SETPRIV_CMD[@]}" "$@"
-    fi
-}
-
 # The volume belongs to the game user while the entrypoint runs as root.
 # Create the runtime paths as that user so no chown (CAP_CHOWN) is needed.
 if ! as_game test -w /data; then
@@ -117,15 +109,15 @@ as_game dbus-daemon --session \
 export DBUS_SESSION_BUS_ADDRESS="$(cat /run/dbus-address)"
 export PULSE_SERVER="unix:${XDG_RUNTIME_DIR}/pulse/native"
 
-as_game env \
+"${SETPRIV_CMD[@]}" env \
     DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
     XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
     pipewire >/data/log/pipewire.log 2>&1 &
-as_game env \
+"${SETPRIV_CMD[@]}" env \
     DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
     XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
     pipewire-pulse >/data/log/pipewire-pulse.log 2>&1 &
-as_game env \
+"${SETPRIV_CMD[@]}" env \
     DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
     XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
     wireplumber >/data/log/wireplumber.log 2>&1 &
@@ -182,12 +174,13 @@ if [ "${INPUT_NETNS_ENABLED:-1}" = "1" ]; then
     fi
 fi
 
+netns_cmd=()
+if [ -n "$INPUT_NETNS" ]; then
+    netns_cmd=(ip netns exec "$INPUT_NETNS")
+fi
+
 if [ "${INPUT_BROKER:-1}" = "1" ]; then
-    broker_cmd=(python3 /usr/local/bin/input-broker.py)
-    if [ -n "$INPUT_NETNS" ]; then
-        broker_cmd=(ip netns exec "$INPUT_NETNS" "${broker_cmd[@]}")
-    fi
-    INPUT_GID="$GID_INPUT" "${broker_cmd[@]}" \
+    INPUT_GID="$GID_INPUT" "${netns_cmd[@]}" python3 /usr/local/bin/input-broker.py \
         >/data/log/input-broker.log 2>&1 &
 fi
 
@@ -200,17 +193,16 @@ if [ "$INPUT_BACKEND" = "xtest" ]; then
             INPUT_DISPLAY=":1"
         fi
     fi
-    : >/data/log/input-bridge.log
-    (
-        while true; do
-            as_game env \
-                XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
-                DISPLAY="$INPUT_DISPLAY" \
+    "${SETPRIV_CMD[@]}" env \
+        XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
+        DISPLAY="$INPUT_DISPLAY" \
+        bash -c '
+            while true; do
                 python3 /usr/local/bin/input-bridge.py \
-                >>/data/log/input-bridge.log 2>&1 || true
-            sleep 1
-        done
-    ) &
+                    >>/data/log/input-bridge.log 2>&1 || true
+                sleep 1
+            done
+        ' &
 fi
 
 APOLLO_ENCODER="${APOLLO_ENCODER:-nvenc}"
@@ -258,7 +250,7 @@ if [ -z "$APOLLO_ADAPTER" ]; then
 fi
 
 log "starting Sway with ${SWAY_BACKENDS} (input: ${INPUT_BACKEND})"
-as_game_netns env \
+"${netns_cmd[@]}" "${SETPRIV_CMD[@]}" env \
     "${SWAY_INPUT_ENV[@]}" \
     DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
     XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
@@ -278,7 +270,7 @@ SWAY_PID=$!
 # Apollo joins the host network namespace while Sway and the broker stay in
 # the private one. Wayland and X11 sockets are filesystem objects, so the
 # split does not affect capture or the game.
-as_game env \
+"${SETPRIV_CMD[@]}" env \
     DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
     XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
     PULSE_SERVER="$PULSE_SERVER" \
@@ -290,4 +282,8 @@ as_game env \
     >>/data/log/sway.log 2>&1 &
 
 log "Sway pid ${SWAY_PID}"
-wait "$SWAY_PID" || true
+# Root privileges are no longer needed; keep the session alive as the game
+# user and exit when Sway does. `wait` cannot be used after the exec because
+# the new shell has no job table.
+exec setpriv --reuid="$GAME_UID" --regid="$GAME_GID" --clear-groups \
+    tail --pid="$SWAY_PID" -f /dev/null
