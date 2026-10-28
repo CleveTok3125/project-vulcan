@@ -33,7 +33,8 @@ which is not available in this container.
 ## Host prerequisites
 
 - Linux host with Docker Engine, rootful mode.
-- NVIDIA driver and NVIDIA Container Toolkit, or AMD/Intel Mesa drivers.
+- NVIDIA driver, or AMD/Intel Mesa drivers; the image ships the NVIDIA
+  userland libraries, so no NVIDIA Container Toolkit is needed.
 - A host user with access to the Docker daemon.
 - Game files available under a host directory that can be mounted read-only.
 - Spritz-Wine-TkG or a Proton tree available on the host under `SPRITZ_DIR`;
@@ -161,10 +162,12 @@ The `make` targets pass `compose.nvidia.yaml`; on AMD/Intel hosts use the raw
    `/dev/input` directory, which belongs to root and reports `0`:
 
    ```bash
-   stat -c '%g %n' /dev/input/event* /dev/dri/renderD128 /dev/dri/card0
+   stat -c '%g %n' /dev/input/event* /dev/dri/renderD128
    ```
 
-   The values are `GID_INPUT`, `GID_RENDER`, and `GID_VIDEO`/`GID_STORAGE`.
+   The values are `GID_INPUT` and `GID_RENDER`. `GID_VIDEO` is the numeric
+   video group from `getent group video`; compose requires it even though no
+   card node is passed.
    When the host has no event node, `getent group input` gives `GID_INPUT`.
    A device owned by group `0` cannot be read by the game user.
 
@@ -448,8 +451,8 @@ or switch the container to a private network namespace.
 
 ## Security
 
-This is a rootful container with `CAP_MKNOD` and a private udev database. It
-can create input nodes inside the container; it does not receive
+This is a rootful container with `CAP_MKNOD` and the capabilities listed
+below. It can create input nodes inside the container; it does not receive
 `/dev/uinput` or `/dev/uhid` and does not install host udev rules. Run only
 trusted game images, and treat the container as part of the host trust
 boundary.
@@ -458,7 +461,10 @@ Additional hardening:
 
 - keep `read_only: true`
 - keep `cap_drop: ALL`
-- keep only `MKNOD` and, when needed, `SYS_ADMIN`
+- add only what the entrypoint needs: `MKNOD` for the input broker,
+  `SYS_ADMIN` for the overlay mount when `ENABLE_OVERLAY=1`, `CHOWN` and
+  `DAC_OVERRIDE` to prepare `/data`, `SETUID` and `SETGID` to drop to the game
+  user, and `NET_ADMIN` for the input netns
 - keep `no-new-privileges:true`
 - do not pass `/dev/dri/card*`
 - do not mount the host Wayland/X11 sockets
