@@ -100,13 +100,87 @@ extern "C" {
     fn ei_unref(context: *mut ei);
 }
 
+/// Emulation state the EIS server allows for the device.
+///
+/// libei discards every event while the device is paused, so events are only
+/// sent after the server confirms the resume. libei expects the client to
+/// answer `EI_EVENT_DEVICE_RESUMED` with `ei_device_start_emulating`, which is
+/// why a request sent before the resume does not count as the answer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Emulation {
+    active: bool,
+    requested: bool,
+    answered: bool,
+}
+
+/// Follow-up work required by an emulation state change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EmulationAction {
+    None,
+    StartEmulating,
+}
+
+impl Emulation {
+    fn paused() -> Self {
+        Self {
+            active: false,
+            requested: false,
+            answered: false,
+        }
+    }
+
+    fn active(self) -> bool {
+        self.active
+    }
+
+    /// Applies one EIS device event.
+    ///
+    /// Every resume gets exactly one answer even when the client already asked
+    /// for it, because the server only accepts events after the answer.
+    fn on_event(&mut self, event_type: c_int) -> EmulationAction {
+        match event_type {
+            EI_EVENT_DEVICE_RESUMED => {
+                self.active = true;
+                self.requested = false;
+                if self.answered {
+                    EmulationAction::None
+                } else {
+                    self.answered = true;
+                    EmulationAction::StartEmulating
+                }
+            }
+            EI_EVENT_DEVICE_PAUSED => {
+                self.active = false;
+                self.requested = false;
+                self.answered = false;
+                EmulationAction::None
+            }
+            EI_EVENT_DEVICE_REMOVED | EI_EVENT_DISCONNECT => {
+                self.active = false;
+                self.requested = false;
+                self.answered = false;
+                EmulationAction::None
+            }
+            _ => EmulationAction::None,
+        }
+    }
+
+    /// Requests emulation unless a request is pending or already answered.
+    fn request(&mut self) -> EmulationAction {
+        if self.active || self.requested || self.answered {
+            return EmulationAction::None;
+        }
+        self.requested = true;
+        EmulationAction::StartEmulating
+    }
+}
+
 struct Backend {
     context: *mut ei,
     device: *mut ei_device,
     sequence: u32,
-    emulating: bool,
+    emulation: Emulation,
     last_attempt: Option<Instant>,
-    last_pump: Option<Instant>,
     last_wait_log: Option<Instant>,
     absolute_x: i32,
     absolute_y: i32,
@@ -130,9 +204,8 @@ impl Backend {
             context: std::ptr::null_mut(),
             device: std::ptr::null_mut(),
             sequence: 0,
-            emulating: false,
+            emulation: Emulation::paused(),
             last_attempt: None,
-            last_pump: None,
             last_wait_log: None,
             absolute_x: 0,
             absolute_y: 0,
@@ -193,8 +266,7 @@ impl Backend {
             unsafe { ei_unref(self.context) };
             self.context = std::ptr::null_mut();
         }
-        self.emulating = false;
-        self.last_pump = None;
+        self.emulation = Emulation::paused();
         self.tracker = touch::Tracker::new();
     }
 
@@ -226,7 +298,10 @@ impl Backend {
     fn ensure_connected(&mut self) -> bool {
         if self.ready() {
             self.pump();
-            return self.emulating;
+            if !self.emulation.active() {
+                self.request_emulation();
+            }
+            return self.emulation.active();
         }
         if let Some(last) = self.last_attempt {
             if last.elapsed() < Duration::from_millis(250) {
@@ -256,17 +331,18 @@ impl Backend {
         }
 
         let deadline = Instant::now() + Duration::from_millis(500);
-        while Instant::now() < deadline && !self.emulating {
+        while Instant::now() < deadline && !self.emulation.active() {
+            self.request_emulation();
             if !self.poll_eis(Duration::from_millis(20)) {
                 self.reset();
                 return false;
             }
         }
 
-        if self.emulating {
+        if self.emulation.active() {
             eprintln!("[vulcan-inputd] connected to gamescope EIS");
         }
-        self.emulating
+        self.emulation.active()
     }
 
     /// Read and dispatch whatever libei has queued.
@@ -294,17 +370,11 @@ impl Backend {
         true
     }
 
-    /// Keep the device state current between input events.
+    /// Drain events queued by the server before the next input is sent.
     ///
-    /// The server only resumes a device after `ei_device_start_emulating`, so
-    /// the resume event has to be read outside the connection attempt as well.
+    /// A pause and the following resume both arrive as events, so they have to
+    /// be read outside the connection attempt as well.
     fn pump(&mut self) {
-        if let Some(last) = self.last_pump {
-            if last.elapsed() < Duration::from_millis(20) {
-                return;
-            }
-        }
-        self.last_pump = Some(Instant::now());
         if !self.poll_eis(Duration::from_millis(0)) {
             self.reset();
         }
@@ -345,20 +415,33 @@ impl Backend {
                             self.device = unsafe { ei_device_ref(device) };
                             self.touch_capable =
                                 unsafe { ei_device_has_capability(device, EI_DEVICE_CAP_TOUCH) };
+                            eprintln!("[vulcan-inputd] EIS device added {device:p}");
                         }
+                    } else {
+                        let device = unsafe { ei_event_get_device(event) };
+                        eprintln!("[vulcan-inputd] EIS extra device ignored {device:p}");
                     }
-                    self.start_emulating();
                 }
                 EI_EVENT_DEVICE_RESUMED => {
-                    if !self.emulating {
-                        eprintln!("[vulcan-inputd] EIS device emulating");
+                    let device = unsafe { ei_event_get_device(event) };
+                    if !device.is_null() && device != self.device {
+                        eprintln!("[vulcan-inputd] EIS resume for untracked device {device:p}");
                     }
-                    self.emulating = true;
+                    let was_active = self.emulation.active();
+                    if self.emulation.on_event(event_type) == EmulationAction::StartEmulating {
+                        self.start_emulating();
+                    }
+                    if !was_active {
+                        eprintln!("[vulcan-inputd] EIS device emulating {device:p}");
+                    }
                 }
                 EI_EVENT_DEVICE_PAUSED => {
-                    eprintln!("[vulcan-inputd] EIS device paused");
-                    self.emulating = false;
-                    self.start_emulating();
+                    let device = unsafe { ei_event_get_device(event) };
+                    let was_active = self.emulation.active();
+                    self.emulation.on_event(event_type);
+                    if was_active {
+                        eprintln!("[vulcan-inputd] EIS device paused {device:p}");
+                    }
                 }
                 EI_EVENT_DEVICE_REMOVED | EI_EVENT_DISCONNECT => self.reset(),
                 _ => {}
@@ -367,11 +450,27 @@ impl Backend {
         }
     }
 
+    /// Requests emulation when the device has no pending request.
+    fn request_emulation(&mut self) -> bool {
+        if self.device.is_null() {
+            return false;
+        }
+        if self.emulation.request() == EmulationAction::StartEmulating {
+            self.start_emulating();
+            return true;
+        }
+        false
+    }
+
     fn start_emulating(&mut self) {
         if self.device.is_null() {
             return;
         }
         self.sequence = self.sequence.wrapping_add(1);
+        eprintln!(
+            "[vulcan-inputd] EIS start emulating seq {} device {:p}",
+            self.sequence, self.device
+        );
         unsafe { ei_device_start_emulating(self.device, self.sequence) };
     }
 
@@ -702,6 +801,64 @@ mod tests {
         assert_eq!(gamepad_button(BTN_WEST), Some(0x8000));
         assert_eq!(gamepad_button(BTN_DPAD_UP), Some(0x0001));
         assert_eq!(gamepad_button(0x999), None);
+    }
+
+    #[test]
+    fn eis_request_is_answered_once_after_the_resume() {
+        let mut emulation = Emulation::paused();
+        assert_eq!(emulation.request(), EmulationAction::StartEmulating);
+        assert_eq!(emulation.request(), EmulationAction::None);
+        assert!(!emulation.active());
+        assert_eq!(
+            emulation.on_event(EI_EVENT_DEVICE_RESUMED),
+            EmulationAction::StartEmulating
+        );
+        assert!(emulation.active());
+        assert_eq!(
+            emulation.on_event(EI_EVENT_DEVICE_RESUMED),
+            EmulationAction::None
+        );
+    }
+
+    #[test]
+    fn eis_pause_blocks_events_until_the_next_resume() {
+        let mut emulation = Emulation::paused();
+        emulation.request();
+        emulation.on_event(EI_EVENT_DEVICE_RESUMED);
+        assert_eq!(
+            emulation.on_event(EI_EVENT_DEVICE_PAUSED),
+            EmulationAction::None
+        );
+        assert!(!emulation.active());
+        assert_eq!(emulation.request(), EmulationAction::StartEmulating);
+        assert_eq!(
+            emulation.on_event(EI_EVENT_DEVICE_RESUMED),
+            EmulationAction::StartEmulating
+        );
+        assert!(emulation.active());
+    }
+
+    #[test]
+    fn eis_resume_without_request_starts_emulation() {
+        let mut emulation = Emulation::paused();
+        assert_eq!(
+            emulation.on_event(EI_EVENT_DEVICE_RESUMED),
+            EmulationAction::StartEmulating
+        );
+        assert!(emulation.active());
+    }
+
+    #[test]
+    fn eis_disconnect_pauses_emulation() {
+        let mut emulation = Emulation::paused();
+        emulation.request();
+        emulation.on_event(EI_EVENT_DEVICE_RESUMED);
+        assert_eq!(
+            emulation.on_event(EI_EVENT_DISCONNECT),
+            EmulationAction::None
+        );
+        assert!(!emulation.active());
+        assert_eq!(emulation.request(), EmulationAction::StartEmulating);
     }
 
     #[test]
