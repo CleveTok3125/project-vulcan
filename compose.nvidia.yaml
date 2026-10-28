@@ -4,7 +4,6 @@ services:
     # nodes is enough. Keep this list in sync with the host driver version;
     # rebuild the image after a major driver update.
     devices:
-      - /dev/dri/card0
       - /dev/nvidiactl
       - /dev/nvidia0
       - /dev/nvidia-modeset
