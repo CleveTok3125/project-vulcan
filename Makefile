@@ -10,7 +10,7 @@ VOLUME := vulcan_$(GAME_ID)-data
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build up rebuild stop down restart logs ps config clean reset stats usage btop nvtop watch
+.PHONY: help build up rebuild stop down restart logs ps config clean reset stats usage btop nvtop shell watch
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -51,6 +51,19 @@ btop: ## Open btop inside the container
 
 nvtop: ## Open nvtop inside the container
 	docker exec -it --user 1000 -e HOME=/data/home $(CONTAINER) nvtop
+
+shell: ## Open a shell with the running session environment
+	WAYLAND_SOCKET=$$(docker exec $(CONTAINER) sh -c 'ls /run/user/1000/wayland-? 2>/dev/null | head -n 1'); \
+	docker exec -it --user 1000 \
+		-e HOME=/data/home \
+		-e XDG_RUNTIME_DIR=/run/user/1000 \
+		-e XDG_CONFIG_HOME=/data/home/.config \
+		-e XDG_CACHE_HOME=/data/home/.cache \
+		-e XDG_DATA_HOME=/data/home/.local/share \
+		-e DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
+		-e PULSE_SERVER=unix:/run/user/1000/pulse/native \
+		-e WAYLAND_DISPLAY="$${WAYLAND_SOCKET##*/}" \
+		$(CONTAINER) bash
 
 watch: ## Refresh container usage every 2 seconds
 	@while true; do printf '\033[2J\033[H'; $(MAKE) --no-print-directory stats; sleep 2; done

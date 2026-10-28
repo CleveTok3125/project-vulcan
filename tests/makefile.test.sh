@@ -52,6 +52,12 @@ check_missing 'explicit env file replaces default' '--env-file .env.local' "$out
 check_contains 'explicit preset volume' 'vulcan_demo-data' "$(run_make clean ENV_FILE=preset.env)"
 check_contains 'explicit preset compose down' '--env-file preset.env' "$(run_make down ENV_FILE=preset.env)"
 
+# The session shell runs outside Compose and sets the session environment.
+out="$(run_make shell)"
+check_contains 'session shell runs as the game user' '--user 1000' "$out"
+check_contains 'session shell sets the runtime dir' 'XDG_RUNTIME_DIR=/run/user/1000' "$out"
+check_contains 'session shell sets the wayland display' 'WAYLAND_DISPLAY=' "$out"
+
 # Targets that do not use Compose must work before any configuration exists.
 rm "$workdir/.env.local"
 out="$(run_help)"
