@@ -29,6 +29,7 @@ printf '%s\n' "$*" >>"$WINE_LOG"
 printf 'env:%s:%s:%s:%s:%s\n' \
     "${WINEESYNC-}" "${WINEFSYNC-}" "${XMODIFIERS-}" \
     "${__GL_SHADER_DISK_CACHE_SKIP_CLEANUP-}" "${DXVK_HUD-}" >>"$WINE_LOG"
+printf 'overrides:%s\n' "${WINEDLLOVERRIDES-}" >>"$WINE_LOG"
 if [ "$1" = "wineboot" ]; then
     if [ "${FAKE_WINEBOOT_FAIL:-0}" = "1" ]; then
         exit 1
@@ -68,6 +69,24 @@ check 'second launch starts game' '1' "$(grep -cx -- "$game_exe" "$wine_log")"
 : >"$wine_log"
 run_launch DXVK_HUD=fps 2>"$workdir/hud.log"
 check 'dxvk hud override' 'yes' "$(grep -qx 'env:1:1:@im=none:1:fps' "$wine_log" && printf yes || printf no)"
+
+# The XInput proxy installs and overrides only while the gamepad is enabled.
+xinput_dll="$workdir/xinput1_4.dll"
+: >"$xinput_dll"
+: >"$wine_log"
+run_launch XINPUT_DLL="$xinput_dll" 2>"$workdir/gamepad.log"
+check 'xinput proxy installed' 'yes' \
+    "$([ -f "$workdir/prefix/drive_c/windows/system32/xinput1_4.dll" ] && printf yes || printf no)"
+check 'xinput override enabled' 'yes' \
+    "$(grep -q 'xinput1_4' "$wine_log" && printf yes || printf no)"
+
+rm -rf "$workdir/prefix"
+: >"$wine_log"
+run_launch INPUT_GAMEPAD=0 XINPUT_DLL="$xinput_dll" 2>"$workdir/gamepad-off.log"
+check 'xinput proxy skipped when disabled' 'no' \
+    "$([ -f "$workdir/prefix/drive_c/windows/system32/xinput1_4.dll" ] && printf yes || printf no)"
+check 'xinput override skipped when disabled' 'no' \
+    "$(grep -q 'xinput1_4' "$wine_log" && printf yes || printf no)"
 
 # Stored game state is cleared once per prefix.
 mkdir -p "$workdir/game/State/Login"

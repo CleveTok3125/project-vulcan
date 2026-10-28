@@ -115,6 +115,7 @@ struct Backend {
     tracker: touch::Tracker,
     gamepad: GamepadState,
     gamepad_path: PathBuf,
+    gamepad_enabled: bool,
 }
 
 impl Backend {
@@ -124,6 +125,7 @@ impl Backend {
             .unwrap_or_else(|_| {
                 PathBuf::from("/data/prefix/drive_c/vulcan-gamepad.bin")
             });
+        let gamepad_enabled = gamepad_enabled(std::env::var("INPUT_GAMEPAD").ok().as_deref());
         let backend = Self {
             context: std::ptr::null_mut(),
             device: std::ptr::null_mut(),
@@ -151,8 +153,11 @@ impl Backend {
                 padding: [0; 7],
             },
             gamepad_path,
+            gamepad_enabled,
         };
-        backend.write_gamepad();
+        if gamepad_enabled {
+            backend.write_gamepad();
+        }
         backend
     }
 
@@ -383,7 +388,9 @@ impl Backend {
             return;
         }
         if event.kind == KIND_GAMEPAD {
-            self.handle_gamepad(event);
+            if self.gamepad_enabled {
+                self.handle_gamepad(event);
+            }
             return;
         }
         if !self.ensure_connected() {
@@ -545,6 +552,11 @@ fn apply_gamepad_event(state: &mut GamepadState, event: Event) -> bool {
     false
 }
 
+/// The proxy is enabled unless explicitly disabled.
+fn gamepad_enabled(value: Option<&str>) -> bool {
+    value.map(|value| value != "0").unwrap_or(true)
+}
+
 fn stick(value: i32) -> i16 {
     value.clamp(i16::MIN as i32, i16::MAX as i32) as i16
 }
@@ -688,6 +700,13 @@ mod tests {
         assert_eq!(gamepad_button(BTN_WEST), Some(0x8000));
         assert_eq!(gamepad_button(BTN_DPAD_UP), Some(0x0001));
         assert_eq!(gamepad_button(0x999), None);
+    }
+
+    #[test]
+    fn gamepad_is_enabled_unless_explicitly_disabled() {
+        assert!(gamepad_enabled(None));
+        assert!(gamepad_enabled(Some("1")));
+        assert!(!gamepad_enabled(Some("0")));
     }
 
     #[test]

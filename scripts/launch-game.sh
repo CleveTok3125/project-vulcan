@@ -8,6 +8,9 @@ export WINE_ROOT="${WINE_ROOT:-${PROTONPATH:-/data/spritz-wine-tkg}}"
 export UMU_USE_STEAM="${UMU_USE_STEAM:-1}"
 export WINEDEBUG="${WINEDEBUG:--all}"
 export WINEARCH="${WINEARCH:-win64}"
+# The gamepad arrives as a file that the XInput proxy reads; disabling it skips
+# both the file and the DLL.
+INPUT_GAMEPAD="${INPUT_GAMEPAD:-1}"
 # Eventfd/futex synchronisation avoids wineserver round trips. fsync needs
 # futex_waitv (Linux 5.16 or later).
 export WINEESYNC="${WINEESYNC:-1}"
@@ -31,7 +34,9 @@ case "$D3D_BACKEND" in
         exit 1
         ;;
 esac
-export WINEDLLOVERRIDES="${WINEDLLOVERRIDES};xinput1_4,xinput1_3,xinput9_1_0=n,b"
+if [ "$INPUT_GAMEPAD" = "1" ]; then
+    export WINEDLLOVERRIDES="${WINEDLLOVERRIDES};xinput1_4,xinput1_3,xinput9_1_0=n,b"
+fi
 
 DXVK_DIR="${DXVK_DIR:-/data/dxvk}"
 
@@ -107,12 +112,14 @@ if [ "$D3D_BACKEND" = "dxvk" ]; then
 fi
 
 XINPUT_DLL="${XINPUT_DLL:-/usr/lib/vulcan/xinput1_4.dll}"
-if [ -f "$XINPUT_DLL" ]; then
-    for dll in xinput1_4.dll xinput1_3.dll xinput9_1_0.dll; do
-        install -m 0644 "$XINPUT_DLL" "$WINEPREFIX/drive_c/windows/system32/$dll"
-    done
-else
-    printf '[vulcan] XInput proxy not found: %s; gamepad disabled\n' "$XINPUT_DLL" >&2
+if [ "$INPUT_GAMEPAD" = "1" ]; then
+    if [ -f "$XINPUT_DLL" ]; then
+        for dll in xinput1_4.dll xinput1_3.dll xinput9_1_0.dll; do
+            install -m 0644 "$XINPUT_DLL" "$WINEPREFIX/drive_c/windows/system32/$dll"
+        done
+    else
+        printf '[vulcan] XInput proxy not found: %s; gamepad disabled\n' "$XINPUT_DLL" >&2
+    fi
 fi
 
 if [ "$GAMESCOPE_ENABLED" = "1" ]; then
