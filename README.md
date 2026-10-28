@@ -342,8 +342,16 @@ and `ZenlessZoneZero_Data/SDKCaches/HoYoPass`. Because it is the lower layer, a
 fresh volume would still start signed in. `GAME_RESET_PATHS` lists
 game-relative paths to remove once per prefix; removals land in the overlay
 upper layer and the host files stay untouched. Setting it on an existing
-prefix applies at the next launch. `make clean` removes the marker, so the
-next launch clears the state again.
+prefix applies at the next launch.
+
+`make clean` resets the container's view of the game tree. It stops the
+container, deletes the overlay upper and work directories, the per-user
+`AppData` directories in the prefix, the logs, and the reset marker, then
+starts the container again. The Wine prefix and Apollo state stay in the
+volume; the next launch reads the host tree again and reapplies
+`GAME_RESET_PATHS`. Use it after the host changes files the container had
+already written, since the overlay keeps the container's copy until it is
+removed.
 
 The overlay mount requires `CAP_SYS_ADMIN`, which is granted to the entrypoint.
 The game runs as a non-root user without that capability.
@@ -351,6 +359,8 @@ The game runs as a non-root user without that capability.
 To update the game, stop the container and run the updater/launcher outside
 the streaming container, or start a separate maintenance container with a
 read-write mount. Do not expose a read-write game directory while streaming.
+Run `make clean` afterwards so the container stops using the copies it wrote
+into its overlay and reads the updated tree.
 
 ## Input
 

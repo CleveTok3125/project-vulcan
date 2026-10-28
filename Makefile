@@ -71,7 +71,7 @@ watch: ## Refresh container usage every 2 seconds
 config: ## Validate and print the resolved compose config
 	$(COMPOSE) config
 
-clean: ## Remove game session data; keep prefix and Apollo state
+clean: ## Reset the game overlay, AppData, logs, and reset marker
 	$(COMPOSE) down
 	docker run --rm -v $(VOLUME):/data --entrypoint sh $(IMAGE) -c 'rm -rf /data/overlay/$(GAME_ID)/upper/* /data/overlay/$(GAME_ID)/work/* /data/prefix/drive_c/users/*/AppData /data/prefix/.vulcan-reset-paths /data/log/*'
 	$(COMPOSE) up -d
