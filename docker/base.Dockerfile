@@ -30,7 +30,9 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
     && printf 'Server = https://archlinux.cachyos.org/repo/$repo/os/$arch\n' >> /etc/pacman.d/mirrorlist
 
 # Refresh the databases after the mirror change so package URLs match the
-# rated mirror instead of the image's original one.
+# rated mirror instead of the image's original one. The list also carries the
+# Apollo runtime dependencies, so installing the built package needs no
+# download.
 RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
     pacman -Syyu --noconfirm --needed --disable-download-timeout \
         base-devel \
@@ -64,7 +66,34 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
         pipewire-pulse \
         wireplumber \
         libinput \
-        ffnvcodec-headers
+        ffnvcodec-headers \
+        adwaita-fonts \
+        adwaita-icon-theme \
+        adwaita-icon-theme-legacy \
+        at-spi2-core \
+        duktape \
+        glib-networking \
+        gsettings-desktop-schemas \
+        gsettings-system-schemas \
+        gtk-update-icon-cache \
+        gtk3 \
+        iso-codes \
+        json-glib \
+        libayatana-appindicator \
+        libcloudproviders \
+        libcolord \
+        libcups \
+        libdbusmenu-glib \
+        libdbusmenu-gtk3 \
+        libnotify \
+        libproxy \
+        libsoup3 \
+        libstemmer \
+        libxinerama \
+        miniupnpc \
+        numactl \
+        tinysparql \
+        xorg-xprop
 
 # aria2c downloads each package over several connections, which matters for
 # the multi-gigabyte CUDA package the Apollo stage pulls. It replaces pacman's
