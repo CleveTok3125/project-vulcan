@@ -92,19 +92,19 @@ The local file is ignored by git. Use it explicitly:
 docker compose --env-file .env.local -f compose.yaml -f compose.nvidia.yaml up -d
 ```
 
-Keep one file per game or host profile and select it with `ENV_FILE`:
+Keep one file per game or host profile and select it with `PRESET`:
 
 ```bash
 cp .env.zzz.example .env.zzz
 $EDITOR .env.zzz
-make up ENV_FILE=.env.zzz
+make up PRESET=.env.zzz
 ```
 
-Every target accepts `ENV_FILE`, including `build`, `logs`, `clean-*`, and
-`uninstall`. The value is a path relative to the repository root; `.env.local`
-is the default. Each `GAME_ID` gets its own container, compose project, and
+`PRESET` selects one preset for every target that acts on a single container,
+including `build`, `logs`, `clean-*`, and `uninstall`. The value is a path
+relative to the repository root; `.env.local` is the default. Each `GAME_ID` gets its own container, compose project, and
 volume, so presets with different `GAME_ID` values run side by side. Each
-target prints the selected file, for example `[vulcan] ENV_FILE=.env.zzz`, and
+target prints the selected file, for example `[vulcan] PRESET=.env.zzz`, and
 marks it as `(missing)` when it does not exist.
 
 `GAME_ID`, `GAME_DIR`, `GAME_EXE`, `RENDER_NODE`, and `SPRITZ_DIR` are
@@ -126,10 +126,10 @@ To run a different game, keep its settings in a separate preset and select it
 for every target. Presets with different `GAME_ID` values run side by side:
 
 ```bash
-make up ENV_FILE=.env.zzz
-make up ENV_FILE=.env.other
-make logs ENV_FILE=.env.other
-make down ENV_FILE=.env.zzz
+make up PRESET=.env.zzz
+make up PRESET=.env.other
+make logs PRESET=.env.other
+make down PRESET=.env.zzz
 ```
 
 Create the preset with `cp .env.zzz.example .env.demo` and set `GAME_ID`,
@@ -139,13 +139,13 @@ Each game gets its own container `vulcan-<GAME_ID>`, compose project, and
 volume `vulcan_<GAME_ID>-data`. Volumes of games that are no longer configured
 remain on the host; remove them with `docker volume rm`.
 
-Start or stop several presets in one call. The list is explicit, and every
-entry must exist before the first container starts:
+Start or stop several presets in one call. The list is colon-separated, and
+every entry must exist before the first container starts:
 
 ```bash
-make up-all PRESETS=".env.zzz .env.other"
-make ps-all PRESETS=".env.zzz .env.other"
-make down-all PRESETS=".env.zzz .env.other"
+make up-all PRESETS=".env.zzz:.env.other"
+make ps-all PRESETS=".env.zzz:.env.other"
+make down-all PRESETS=".env.zzz:.env.other"
 ```
 
 Set a distinct `APOLLO_PORT` in every preset that runs at the same time,

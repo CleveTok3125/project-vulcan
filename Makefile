@@ -1,9 +1,9 @@
 SHELL := /bin/bash
-# Select another configuration preset with `make <target> ENV_FILE=<path>`.
-ENV_FILE ?= .env.local
--include $(ENV_FILE)
+# Select another configuration preset with `make <target> PRESET=<path>`.
+PRESET ?= .env.local
+-include $(PRESET)
 GAME_ID ?= zzz
-COMPOSE = docker compose --env-file $(ENV_FILE) -f compose.yaml -f compose.nvidia.yaml
+COMPOSE = docker compose --env-file $(PRESET) -f compose.yaml -f compose.nvidia.yaml
 IMAGE := vulcan/game-stream:local
 CONTAINER := vulcan-$(GAME_ID)
 VOLUME := vulcan_$(GAME_ID)-data
@@ -13,7 +13,7 @@ VOLUME := vulcan_$(GAME_ID)-data
 GROUP_TARGETS := up-all down-all ps-all
 ifeq ($(MAKELEVEL),0)
 ifeq ($(filter $(GROUP_TARGETS),$(MAKECMDGOALS)),)
-$(info [vulcan] ENV_FILE=$(ENV_FILE)$(if $(wildcard $(ENV_FILE)),, (missing)))
+$(info [vulcan] PRESET=$(PRESET)$(if $(wildcard $(PRESET)),, (missing)))
 endif
 endif
 
@@ -23,8 +23,8 @@ endif
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
-	@printf '\nENV_FILE selects the configuration preset (default: .env.local).\n'
-	@printf 'PRESETS lists several presets for the *-all targets.\n'
+	@printf '\nPRESET selects the configuration preset (default: .env.local).\n'
+	@printf 'PRESETS lists several presets for the *-all targets, separated by colons.\n'
 
 build: ## Build the container image
 	$(COMPOSE) build
@@ -50,32 +50,34 @@ logs: ## Follow container logs
 ps: ## Show container status
 	$(COMPOSE) ps
 
-# Group targets take an explicit list:
-#   make up-all PRESETS=".env.zzz .env.broforce"
+# Group targets take an explicit, colon-separated list:
+#   make up-all PRESETS=".env.zzz:.env.broforce"
 PRESETS ?=
-CHECK_PRESETS = test -n "$(PRESETS)" || { printf '%s\n' 'set PRESETS, for example PRESETS=".env.zzz .env.broforce"' >&2; exit 1; }
+PRESET_LIST = $(subst :, ,$(PRESETS))
+CHECK_PRESETS = test -n "$(PRESETS)" || { printf '%s\n' 'set PRESETS, for example PRESETS=".env.zzz:.env.broforce"' >&2; exit 1; }; \
+	case "$(PRESETS)" in *[[:space:]]*) printf '%s\n' 'PRESETS takes colon-separated paths without spaces' >&2; exit 1 ;; esac
 
 up-all: _check-presets ## Start every preset listed in PRESETS
-	@for preset in $(PRESETS); do \
-		printf '[vulcan] ENV_FILE=%s\n' "$$preset"; \
-		$(MAKE) --no-print-directory up ENV_FILE="$$preset" || exit 1; \
+	@for preset in $(PRESET_LIST); do \
+		printf '[vulcan] PRESET=%s\n' "$$preset"; \
+		$(MAKE) --no-print-directory up PRESET="$$preset" || exit 1; \
 	done
 
 down-all: _check-presets ## Stop and remove every preset listed in PRESETS
-	@for preset in $(PRESETS); do \
-		printf '[vulcan] ENV_FILE=%s\n' "$$preset"; \
-		$(MAKE) --no-print-directory down ENV_FILE="$$preset" || exit 1; \
+	@for preset in $(PRESET_LIST); do \
+		printf '[vulcan] PRESET=%s\n' "$$preset"; \
+		$(MAKE) --no-print-directory down PRESET="$$preset" || exit 1; \
 	done
 
 ps-all: _check-presets ## Show the status of every preset listed in PRESETS
-	@for preset in $(PRESETS); do \
-		printf '[vulcan] ENV_FILE=%s\n' "$$preset"; \
-		$(MAKE) --no-print-directory ps ENV_FILE="$$preset" || exit 1; \
+	@for preset in $(PRESET_LIST); do \
+		printf '[vulcan] PRESET=%s\n' "$$preset"; \
+		$(MAKE) --no-print-directory ps PRESET="$$preset" || exit 1; \
 	done
 
 _check-presets:
 	@$(CHECK_PRESETS)
-	@for preset in $(PRESETS); do \
+	@for preset in $(PRESET_LIST); do \
 		test -f "$$preset" || { printf 'missing preset: %s\n' "$$preset" >&2; exit 1; }; \
 	done
 

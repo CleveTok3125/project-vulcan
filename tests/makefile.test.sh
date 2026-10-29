@@ -43,33 +43,33 @@ run_help() {
 # The default configuration file keeps working without arguments.
 out="$(run_make up)"
 check_contains 'default env file' '--env-file .env.local' "$out"
-check_contains 'default preset is reported' '[vulcan] ENV_FILE=.env.local' "$out"
+check_contains 'default preset is reported' '[vulcan] PRESET=.env.local' "$out"
 check_contains 'default volume' 'vulcan_zzz-data' "$(run_make clean-logs)"
 
 # An explicit file replaces the default for every target.
-out="$(run_make up ENV_FILE=preset.env)"
+out="$(run_make up PRESET=preset.env)"
 check_contains 'explicit env file' '--env-file preset.env' "$out"
-check_contains 'explicit preset is reported' '[vulcan] ENV_FILE=preset.env' "$out"
+check_contains 'explicit preset is reported' '[vulcan] PRESET=preset.env' "$out"
 check_missing 'explicit env file replaces default' '--env-file .env.local' "$out"
-check_contains 'explicit preset volume' 'vulcan_demo-data' "$(run_make clean-overlay ENV_FILE=preset.env)"
-check_contains 'explicit preset compose down' '--env-file preset.env' "$(run_make down ENV_FILE=preset.env)"
+check_contains 'explicit preset volume' 'vulcan_demo-data' "$(run_make clean-overlay PRESET=preset.env)"
+check_contains 'explicit preset compose down' '--env-file preset.env' "$(run_make down PRESET=preset.env)"
 
 # A missing preset is marked in the report.
-out="$(run_make up ENV_FILE=absent.env)"
-check_contains 'missing preset is marked' '[vulcan] ENV_FILE=absent.env (missing)' "$out"
+out="$(run_make up PRESET=absent.env)"
+check_contains 'missing preset is marked' '[vulcan] PRESET=absent.env (missing)' "$out"
 
 # Group targets report and start every listed preset.
-out="$(run_make up-all PRESETS=".env.local preset.env")"
-check_contains 'up-all reports the first preset' '[vulcan] ENV_FILE=.env.local' "$out"
-check_contains 'up-all reports the second preset' '[vulcan] ENV_FILE=preset.env' "$out"
+out="$(run_make up-all PRESETS=".env.local:preset.env")"
+check_contains 'up-all reports the first preset' '[vulcan] PRESET=.env.local' "$out"
+check_contains 'up-all reports the second preset' '[vulcan] PRESET=preset.env' "$out"
 check_contains 'up-all starts the first preset' '--env-file .env.local' "$out"
 check_contains 'up-all starts the second preset' '--env-file preset.env' "$out"
 
-out="$(run_make down-all PRESETS=".env.local preset.env")"
+out="$(run_make down-all PRESETS=".env.local:preset.env")"
 check_contains 'down-all stops the second preset' '--env-file preset.env' "$out"
 
 out="$(run_make ps-all PRESETS="preset.env")"
-check_contains 'ps-all reports the preset' '[vulcan] ENV_FILE=preset.env' "$out"
+check_contains 'ps-all reports the preset' '[vulcan] PRESET=preset.env' "$out"
 check_missing 'ps-all leaves out unlisted presets' '--env-file .env.local' "$out"
 
 # The list is required and every entry must exist.
@@ -78,6 +78,12 @@ if (cd "$workdir" && make --no-print-directory up-all >/dev/null 2>&1); then
     failures=$((failures + 1))
 else
     printf 'ok   up-all requires PRESETS\n'
+fi
+if (cd "$workdir" && make --no-print-directory up-all PRESETS=".env.local preset.env" >/dev/null 2>&1); then
+    printf 'FAIL up-all rejects spaces: it accepted a space-separated list\n' >&2
+    failures=$((failures + 1))
+else
+    printf 'ok   up-all rejects spaces\n'
 fi
 if (cd "$workdir" && make --no-print-directory up-all PRESETS=absent.env >/dev/null 2>&1); then
     printf 'FAIL up-all rejects a missing preset: it ran with absent.env\n' >&2
@@ -125,7 +131,7 @@ check_contains 'session shell sets the runtime dir' 'XDG_RUNTIME_DIR=/run/user/1
 check_contains 'session shell sets the wayland display' 'WAYLAND_DISPLAY=' "$out"
 
 # Uninstall removes the container, its volume, and the image.
-out="$(run_make uninstall CONFIRM=1 ENV_FILE=preset.env)"
+out="$(run_make uninstall CONFIRM=1 PRESET=preset.env)"
 check_contains 'uninstall uses the explicit preset' '--env-file preset.env' "$out"
 check_contains 'uninstall removes the image' 'docker rmi vulcan/game-stream:local' "$out"
 
