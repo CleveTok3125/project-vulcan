@@ -139,6 +139,15 @@ Each game gets its own container `vulcan-<GAME_ID>`, compose project, and
 volume `vulcan_<GAME_ID>-data`. Volumes of games that are no longer configured
 remain on the host; remove them with `docker volume rm`.
 
+Start or stop several presets in one call. The list is explicit, and every
+entry must exist before the first container starts:
+
+```bash
+make up-all PRESETS=".env.zzz .env.other"
+make ps-all PRESETS=".env.zzz .env.other"
+make down-all PRESETS=".env.zzz .env.other"
+```
+
 Set a distinct `APOLLO_PORT` in every preset that runs at the same time,
 because Apollo binds on the host network; the web UI listens on
 `APOLLO_PORT + 1`. Both sessions share one GPU, so VRAM, memory bandwidth, and

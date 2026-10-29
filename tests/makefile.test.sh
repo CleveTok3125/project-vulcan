@@ -58,6 +58,34 @@ check_contains 'explicit preset compose down' '--env-file preset.env' "$(run_mak
 out="$(run_make up ENV_FILE=absent.env)"
 check_contains 'missing preset is marked' '[vulcan] ENV_FILE=absent.env (missing)' "$out"
 
+# Group targets report and start every listed preset.
+out="$(run_make up-all PRESETS=".env.local preset.env")"
+check_contains 'up-all reports the first preset' '[vulcan] ENV_FILE=.env.local' "$out"
+check_contains 'up-all reports the second preset' '[vulcan] ENV_FILE=preset.env' "$out"
+check_contains 'up-all starts the first preset' '--env-file .env.local' "$out"
+check_contains 'up-all starts the second preset' '--env-file preset.env' "$out"
+
+out="$(run_make down-all PRESETS=".env.local preset.env")"
+check_contains 'down-all stops the second preset' '--env-file preset.env' "$out"
+
+out="$(run_make ps-all PRESETS="preset.env")"
+check_contains 'ps-all reports the preset' '[vulcan] ENV_FILE=preset.env' "$out"
+check_missing 'ps-all leaves out unlisted presets' '--env-file .env.local' "$out"
+
+# The list is required and every entry must exist.
+if (cd "$workdir" && make --no-print-directory up-all >/dev/null 2>&1); then
+    printf 'FAIL up-all requires PRESETS: it ran without a list\n' >&2
+    failures=$((failures + 1))
+else
+    printf 'ok   up-all requires PRESETS\n'
+fi
+if (cd "$workdir" && make --no-print-directory up-all PRESETS=absent.env >/dev/null 2>&1); then
+    printf 'FAIL up-all rejects a missing preset: it ran with absent.env\n' >&2
+    failures=$((failures + 1))
+else
+    printf 'ok   up-all rejects a missing preset\n'
+fi
+
 # Cleanup targets remove only their own paths.
 out="$(run_make clean-logs)"
 check_contains 'clean-logs removes log files' '/data/log/*' "$out"
@@ -105,6 +133,7 @@ check_contains 'uninstall removes the image' 'docker rmi vulcan/game-stream:loca
 rm "$workdir/.env.local"
 out="$(run_help)"
 check_contains 'help without env file' 'Show available targets' "$out"
+check_contains 'help lists the group targets' 'up-all' "$out"
 
 if [ "$failures" -ne 0 ]; then
     printf '%s check(s) failed\n' "$failures" >&2

@@ -8,18 +8,23 @@ IMAGE := vulcan/game-stream:local
 CONTAINER := vulcan-$(GAME_ID)
 VOLUME := vulcan_$(GAME_ID)-data
 
-# Show the selected preset once per invocation; `watch` calls make in a loop.
+# Show the selected preset once per invocation; `watch` calls make in a loop
+# and the group targets report each preset from their own loop.
+GROUP_TARGETS := up-all down-all ps-all
 ifeq ($(MAKELEVEL),0)
+ifeq ($(filter $(GROUP_TARGETS),$(MAKECMDGOALS)),)
 $(info [vulcan] ENV_FILE=$(ENV_FILE)$(if $(wildcard $(ENV_FILE)),, (missing)))
+endif
 endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build up rebuild stop down restart logs ps config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
+.PHONY: help build up rebuild stop down restart logs ps up-all down-all ps-all _check-presets config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 	@printf '\nENV_FILE selects the configuration preset (default: .env.local).\n'
+	@printf 'PRESETS lists several presets for the *-all targets.\n'
 
 build: ## Build the container image
 	$(COMPOSE) build
@@ -44,6 +49,35 @@ logs: ## Follow container logs
 
 ps: ## Show container status
 	$(COMPOSE) ps
+
+# Group targets take an explicit list:
+#   make up-all PRESETS=".env.zzz .env.broforce"
+PRESETS ?=
+CHECK_PRESETS = test -n "$(PRESETS)" || { printf '%s\n' 'set PRESETS, for example PRESETS=".env.zzz .env.broforce"' >&2; exit 1; }
+
+up-all: _check-presets ## Start every preset listed in PRESETS
+	@for preset in $(PRESETS); do \
+		printf '[vulcan] ENV_FILE=%s\n' "$$preset"; \
+		$(MAKE) --no-print-directory up ENV_FILE="$$preset" || exit 1; \
+	done
+
+down-all: _check-presets ## Stop and remove every preset listed in PRESETS
+	@for preset in $(PRESETS); do \
+		printf '[vulcan] ENV_FILE=%s\n' "$$preset"; \
+		$(MAKE) --no-print-directory down ENV_FILE="$$preset" || exit 1; \
+	done
+
+ps-all: _check-presets ## Show the status of every preset listed in PRESETS
+	@for preset in $(PRESETS); do \
+		printf '[vulcan] ENV_FILE=%s\n' "$$preset"; \
+		$(MAKE) --no-print-directory ps ENV_FILE="$$preset" || exit 1; \
+	done
+
+_check-presets:
+	@$(CHECK_PRESETS)
+	@for preset in $(PRESETS); do \
+		test -f "$$preset" || { printf 'missing preset: %s\n' "$$preset" >&2; exit 1; }; \
+	done
 
 stats: ## Show container CPU, memory, and GPU usage
 	@docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}' $(CONTAINER)
