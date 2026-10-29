@@ -80,6 +80,21 @@ out="$(run_make ps-all PRESETS="preset.env")"
 check_contains 'ps-all reports the preset' '[vulcan] PRESET=preset.env' "$out"
 check_missing 'ps-all leaves out unlisted presets' '--env-file .env.local' "$out"
 
+out="$(run_make stop-all PRESETS=".env.local:preset.env")"
+check_contains 'stop-all reports the first preset' '[vulcan] PRESET=.env.local' "$out"
+check_contains 'stop-all stops the second preset' '--env-file preset.env' "$out"
+
+out="$(run_make restart-all PRESETS="preset.env")"
+check_contains 'restart-all restarts the preset' '--env-file preset.env' "$out"
+
+out="$(run_make build-all PRESETS="preset.env")"
+check_contains 'build-all builds the preset' ' build' "$out"
+check_contains 'build-all uses the preset' '--env-file preset.env' "$out"
+
+out="$(run_make stats-all PRESETS=".env.local:preset.env")"
+check_contains 'stats-all inspects the first container' 'vulcan-zzz' "$out"
+check_contains 'stats-all inspects the second container' 'vulcan-demo' "$out"
+
 # The list is required and every entry must exist.
 if (cd "$workdir" && make --no-print-directory up-all >/dev/null 2>&1); then
     printf 'FAIL up-all requires PRESETS: it ran without a list\n' >&2

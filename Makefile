@@ -22,7 +22,7 @@ VOLUME := vulcan_$(GAME_ID)-data
 
 # Show the selected preset once per invocation; `watch` calls make in a loop
 # and the group targets report each preset from their own loop.
-GROUP_TARGETS := up-all down-all ps-all
+GROUP_TARGETS := up-all down-all stop-all restart-all ps-all build-all stats-all
 ifeq ($(MAKELEVEL),0)
 ifeq ($(filter $(GROUP_TARGETS),$(MAKECMDGOALS)),)
 $(info [vulcan] PRESET=$(PRESET))
@@ -31,7 +31,7 @@ endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build up rebuild stop down restart logs ps up-all down-all ps-all _check-presets config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
+.PHONY: help build up rebuild stop down restart logs ps up-all down-all stop-all restart-all ps-all build-all stats-all _check-presets config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -81,10 +81,34 @@ down-all: _check-presets ## Stop and remove every preset listed in PRESETS
 		$(MAKE) --no-print-directory down PRESET="$$preset" || exit 1; \
 	done
 
+stop-all: _check-presets ## Stop every preset listed in PRESETS
+	@for preset in $(PRESET_LIST); do \
+		printf '[vulcan] PRESET=%s\n' "$$preset"; \
+		$(MAKE) --no-print-directory stop PRESET="$$preset" || exit 1; \
+	done
+
+restart-all: _check-presets ## Restart every preset listed in PRESETS
+	@for preset in $(PRESET_LIST); do \
+		printf '[vulcan] PRESET=%s\n' "$$preset"; \
+		$(MAKE) --no-print-directory restart PRESET="$$preset" || exit 1; \
+	done
+
 ps-all: _check-presets ## Show the status of every preset listed in PRESETS
 	@for preset in $(PRESET_LIST); do \
 		printf '[vulcan] PRESET=%s\n' "$$preset"; \
 		$(MAKE) --no-print-directory ps PRESET="$$preset" || exit 1; \
+	done
+
+build-all: _check-presets ## Build the image for every preset listed in PRESETS
+	@for preset in $(PRESET_LIST); do \
+		printf '[vulcan] PRESET=%s\n' "$$preset"; \
+		$(MAKE) --no-print-directory build PRESET="$$preset" || exit 1; \
+	done
+
+stats-all: _check-presets ## Show resource usage for every preset listed in PRESETS
+	@for preset in $(PRESET_LIST); do \
+		printf '[vulcan] PRESET=%s\n' "$$preset"; \
+		$(MAKE) --no-print-directory stats PRESET="$$preset" || exit 1; \
 	done
 
 _check-presets:
@@ -157,7 +181,7 @@ uninstall: ## Remove the container, its data, and the image; requires CONFIRM=1
 
 # Targets that act on one container need a preset; `help` works without one and
 # the group targets resolve a preset per entry.
-CONFIG_GOALS := $(filter-out help up-all down-all ps-all,$(MAKECMDGOALS))
+CONFIG_GOALS := $(filter-out help $(GROUP_TARGETS),$(MAKECMDGOALS))
 ifneq ($(CONFIG_GOALS),)
 ifeq ($(wildcard $(PRESET)),)
 $(error preset $(PRESET) does not exist: set PRESET=<path>)

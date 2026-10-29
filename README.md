@@ -153,9 +153,14 @@ every entry must exist before the first container starts:
 
 ```bash
 make up-all PRESETS=".env.zzz:.env.other"
-make ps-all PRESETS=".env.zzz:.env.other"
+make stats-all PRESETS=".env.zzz:.env.other"
+make build-all PRESETS=".env.zzz:.env.other"
 make down-all PRESETS=".env.zzz:.env.other"
 ```
+
+The group targets cover `up`, `down`, `stop`, `restart`, `ps`, `build`, and
+`stats`. Targets that act on one container at a time, such as `logs`, `shell`,
+`btop`, `nvtop`, `watch`, `clean-*`, and `uninstall`, stay per preset.
 
 Set a distinct `APOLLO_PORT` in every preset that runs at the same time,
 because Apollo binds on the host network; the web UI listens on
