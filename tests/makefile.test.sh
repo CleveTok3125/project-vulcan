@@ -180,6 +180,23 @@ else
     failures=$((failures + 1))
 fi
 
+# Image management targets.
+out="$(run_make images)"
+check_contains 'images calls docker images' 'docker images' "$out"
+check_contains 'images filters the Vulcan rows' '/^vulcan\//' "$out"
+if (cd "$workdir" && make --no-print-directory images 2>/dev/null | grep -q 'REPOSITORY'); then
+    printf 'ok   images prints a table\n'
+else
+    printf 'FAIL images prints a table: no header\n' >&2
+    failures=$((failures + 1))
+fi
+
+if (cd "$workdir" && make --no-print-directory base-rebuild >/dev/null 2>&1); then
+    printf 'FAIL base-rebuild requires CONFIRM\n' >&2
+    failures=$((failures + 1))
+else
+    printf 'ok   base-rebuild requires CONFIRM\n'
+fi
 # The image tag follows the build inputs, not the game.
 tag_for() {
     printf '%s\n' "$1" | sed -n 's/.*docker rmi vulcan\/game-stream://p' | head -n 1
@@ -210,6 +227,13 @@ fi
 
 # Targets that do not use Compose must work before any configuration exists.
 rm "$workdir/.env.local"
+if (cd "$workdir" && make --no-print-directory images >/dev/null 2>&1); then
+    printf 'ok   images works without a preset\n'
+else
+    printf 'FAIL images works without a preset\n' >&2
+    failures=$((failures + 1))
+fi
+
 out="$(run_make stats 2>&1 || true)"
 check_contains 'container targets need a preset' 'preset .env.local does not exist' "$out"
 

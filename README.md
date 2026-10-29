@@ -72,7 +72,10 @@ The base tag hashes that file and `MIRROR_COUNTRY`; the game tag hashes the base
 tag, `GPU_VENDOR`, `APOLLO_PKG`, and `APOLLO_COMMIT`. Editing scripts or config
 rebuilds the last layers only, an Apollo bump rebuilds the Apollo stage only,
 and a package change rebuilds the base and everything above it. `uninstall`
-removes the game image; remove a base image with `docker rmi <tag>`.
+removes the game image.
+
+`make images` lists the Vulcan images, and `make base-rebuild CONFIRM=1`
+rebuilds the base image without cache for when the upstream packages moved.
 
 ## Reproducible builds
 
