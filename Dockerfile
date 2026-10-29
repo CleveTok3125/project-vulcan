@@ -15,7 +15,7 @@ RUN if [ "$GPU_VENDOR" = "nvidia" ]; then \
         pacman -S --noconfirm --needed --disable-download-timeout vulkan-radeon libva-mesa-driver; \
     fi
 
-FROM game-base AS apollo-builder
+FROM ${BASE_IMAGE} AS apollo-builder
 
 ARG APOLLO_PKG=apollo-git
 ARG APOLLO_COMMIT=adc5c5a0bd80831ce495434bb16aee2cd4175fb8
@@ -41,7 +41,7 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
        fi \
     && makepkg -s --noconfirm
 
-FROM game-base AS native-builder
+FROM ${BASE_IMAGE} AS native-builder
 
 COPY native /src
 RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
@@ -54,7 +54,7 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
     && gcc -O2 -shared -fPIC -o /out/libglycin-nosandbox.so /src/glycin-nosandbox.c -ldl \
     && gcc -O2 -shared -fPIC -o /out/libvulcan-input-grab.so /src/input-grab.c -ldl
 
-FROM game-base AS rust-builder
+FROM ${BASE_IMAGE} AS rust-builder
 
 RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
     pacman -S --noconfirm --needed --disable-download-timeout rust
