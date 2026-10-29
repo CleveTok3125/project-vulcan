@@ -102,10 +102,10 @@ make up ENV_FILE=.env.zzz
 
 Every target accepts `ENV_FILE`, including `build`, `logs`, `clean-*`, and
 `uninstall`. The value is a path relative to the repository root; `.env.local`
-is the default. Only one container runs at a time, and each `GAME_ID` keeps
-its own volume. Each target prints the selected file, for example
-`[vulcan] ENV_FILE=.env.zzz`, and marks it as `(missing)` when it does not
-exist.
+is the default. Each `GAME_ID` gets its own container, compose project, and
+volume, so presets with different `GAME_ID` values run side by side. Each
+target prints the selected file, for example `[vulcan] ENV_FILE=.env.zzz`, and
+marks it as `(missing)` when it does not exist.
 
 `GAME_ID`, `GAME_DIR`, `GAME_EXE`, `RENDER_NODE`, and `SPRITZ_DIR` are
 required. `GAME_DIR` is mounted at `/games-ro/<GAME_ID>`; `GAME_EXE` is the
@@ -114,28 +114,37 @@ executable path inside the writable overlay view at `/games/<GAME_ID>`.
 ### Game identity
 
 `GAME_ID` names everything derived from the game: the read-only mount point,
-the overlay directories, the data volume `vulcan_<GAME_ID>-data`, and the
-default Apollo host name `Vulcan-<GAME_ID>`.
+the overlay directories, the data volume `vulcan_<GAME_ID>-data`, the compose
+project and container `vulcan-<GAME_ID>`, and the default Apollo host name
+`Vulcan-<GAME_ID>`.
 
 `GAME_APP_NAME` is the app label shown to clients. `GAME_APP_UUID` identifies
 that app entry; leave it empty to derive a stable UUID from `GAME_ID`, or set
 it explicitly, for example to keep the identity clients already stored.
 
-To run a different game, keep its settings in a separate preset and select
-it for every target:
+To run a different game, keep its settings in a separate preset and select it
+for every target. Presets with different `GAME_ID` values run side by side:
 
 ```bash
-make down
-make up ENV_FILE=.env.demo
+make up ENV_FILE=.env.zzz
+make up ENV_FILE=.env.other
+make logs ENV_FILE=.env.other
+make down ENV_FILE=.env.zzz
 ```
 
 Create the preset with `cp .env.zzz.example .env.demo` and set `GAME_ID`,
 `GAME_DIR`, `GAME_EXE`, and `GAME_APP_NAME` as described above.
 
-The new game gets its own volume, so its Wine prefix and overlay writes stay
-separate. Volumes of games that are no longer configured remain on the host;
-remove them with `docker volume rm`. Only one game runs at a time: the
-container name and Apollo port are fixed.
+Each game gets its own container `vulcan-<GAME_ID>`, compose project, and
+volume `vulcan_<GAME_ID>-data`. Volumes of games that are no longer configured
+remain on the host; remove them with `docker volume rm`.
+
+Set a distinct `APOLLO_PORT` in every preset that runs at the same time,
+because Apollo binds on the host network; the web UI listens on
+`APOLLO_PORT + 1`. Both sessions share one GPU, so VRAM, memory bandwidth, and
+the driver's NVENC session limit apply to the sum of the streams. The image and
+the NVIDIA device configuration are shared: run `make down` for every preset
+before `make uninstall`.
 
 ## Fresh deployment
 

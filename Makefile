@@ -5,7 +5,7 @@ ENV_FILE ?= .env.local
 GAME_ID ?= zzz
 COMPOSE = docker compose --env-file $(ENV_FILE) -f compose.yaml -f compose.nvidia.yaml
 IMAGE := vulcan/game-stream:local
-CONTAINER := vulcan-game
+CONTAINER := vulcan-$(GAME_ID)
 VOLUME := vulcan_$(GAME_ID)-data
 
 # Show the selected preset once per invocation; `watch` calls make in a loop.

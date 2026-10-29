@@ -1,4 +1,4 @@
-name: vulcan
+name: "vulcan-${GAME_ID}"
 
 services:
   game:
@@ -11,7 +11,7 @@ services:
         APOLLO_COMMIT: "${APOLLO_COMMIT:-adc5c5a0bd80831ce495434bb16aee2cd4175fb8}"
         MIRROR_COUNTRY: "${MIRROR_COUNTRY:-}"
     image: vulcan/game-stream:local
-    container_name: vulcan-game
+    container_name: "vulcan-${GAME_ID}"
     init: true
     network_mode: host
     read_only: true
