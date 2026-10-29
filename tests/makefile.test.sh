@@ -193,6 +193,10 @@ else
 fi
 
 # Image management targets.
+out="$(run_make rm-base)"
+check_contains 'rm-base removes the base image' 'docker rmi' "$out"
+check_contains 'rm-base needs no preset' 'vulcan/base' "$out"
+
 out="$(run_make images)"
 check_contains 'images calls docker images' 'docker images' "$out"
 check_contains 'images filters the Vulcan rows' '/^vulcan\//' "$out"

@@ -31,14 +31,14 @@ VOLUME := vulcan_$(GAME_ID)-data
 # and the group targets report each preset from their own loop.
 GROUP_TARGETS := up-all down-all stop-all restart-all ps-all build-all stats-all uninstall-all
 ifeq ($(MAKELEVEL),0)
-ifeq ($(filter base images prune-images $(GROUP_TARGETS),$(MAKECMDGOALS)),)
+ifeq ($(filter base rm-base images $(GROUP_TARGETS),$(MAKECMDGOALS)),)
 $(info [vulcan] PRESET=$(PRESET))
 endif
 endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help base base-rebuild images build up rebuild stop down restart logs ps up-all down-all stop-all restart-all ps-all build-all stats-all uninstall-all _check-presets config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
+.PHONY: help base base-rebuild rm-base images build up rebuild stop down restart logs ps up-all down-all stop-all restart-all ps-all build-all stats-all uninstall-all _check-presets config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -57,6 +57,11 @@ base-rebuild: ## Rebuild the shared base image without cache; requires CONFIRM=1
 		-f $(BASE_DOCKERFILE) \
 		--build-arg MIRROR_COUNTRY="$(MIRROR_COUNTRY)" \
 		-t $(BASE_IMAGE) .
+
+rm-base: ## Remove the base image
+	@images=$$(docker images --format '{{.Repository}}:{{.Tag}}' vulcan/base); \
+	if [ -z "$$images" ]; then printf 'no base image\n'; exit 0; fi; \
+	for image in $$images; do docker rmi "$$image" || exit 1; done
 
 build: base ## Build the container image
 	$(COMPOSE) build
@@ -213,7 +218,7 @@ uninstall: ## Remove the container, its data, and the image; requires CONFIRM=1
 # Targets that act on one container need a preset; `help` works without one and
 # the group targets resolve a preset per entry.
 KNOWN_TARGETS := $(shell grep -hoE '^[a-zA-Z0-9_-]+:' $(MAKEFILE_LIST) | tr -d ':')
-CONFIG_GOALS := $(filter-out help base base-rebuild images $(GROUP_TARGETS),$(filter $(KNOWN_TARGETS),$(MAKECMDGOALS)))
+CONFIG_GOALS := $(filter-out help base base-rebuild rm-base images $(GROUP_TARGETS),$(filter $(KNOWN_TARGETS),$(MAKECMDGOALS)))
 ifneq ($(CONFIG_GOALS),)
 ifeq ($(wildcard $(PRESET)),)
 $(error preset $(PRESET) does not exist: set PRESET=<path>)
