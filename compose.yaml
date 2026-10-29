@@ -5,7 +5,7 @@ services:
     build:
       context: .
       args:
-        BASE_IMAGE: "${BASE_IMAGE:-vulcan/base:local}"
+        BASE_IMAGE: "${BASE_IMAGE:?run make base first}"
         GPU_VENDOR: "${GPU_VENDOR:-nvidia}"
         APOLLO_PKG: "${APOLLO_PKG:-apollo-git}"
         APOLLO_COMMIT: "${APOLLO_COMMIT:-adc5c5a0bd80831ce495434bb16aee2cd4175fb8}"

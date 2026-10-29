@@ -50,7 +50,7 @@ EOF
 }
 
 render() {
-    docker compose --env-file "$1" \
+    BASE_IMAGE=vulcan/base:test docker compose --env-file "$1" \
         -f "$repo_root/compose.yaml" -f "$repo_root/compose.nvidia.yaml" \
         config 2>/dev/null
 }

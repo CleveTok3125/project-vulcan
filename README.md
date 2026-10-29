@@ -74,6 +74,10 @@ rebuilds the last layers only, an Apollo bump rebuilds the Apollo stage only,
 and a package change rebuilds the base and everything above it. `uninstall`
 removes the game image.
 
+Calling Compose without `make`, such as the AMD/Intel form above, needs the
+base image first: run `make base` and pass `BASE_IMAGE` to the build, or build
+through `make`.
+
 `make images` lists the Vulcan images, and `make base-rebuild CONFIRM=1`
 rebuilds the base image without cache for when the upstream packages moved.
 
