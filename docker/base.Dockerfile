@@ -71,7 +71,12 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
 # parallel package download, so keep it to one transfer at a time.
 RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
     pacman -S --noconfirm --needed --disable-download-timeout aria2 \
-    && printf '\nXferCommand = /usr/bin/aria2c --console-log-level=error -c -x 16 -s 16 -k 1M --file-allocation=none -o %%o %%u\n' >> /etc/pacman.conf
+    && printf '%s\n' '#!/bin/sh' \
+        '# pacman XferCommand: $1 is the URL, $2 the local path.' \
+        'exec /usr/bin/aria2c --console-log-level=error -c -x 16 -s 16 -k 1M --file-allocation=none -d "$(dirname "$2")" -o "$(basename "$2")" "$1"' \
+        > /usr/local/bin/pacman-aria2 \
+    && chmod 0755 /usr/local/bin/pacman-aria2 \
+    && sed -i '/^\[options\]/a XferCommand = /usr/local/bin/pacman-aria2 %u %o' /etc/pacman.conf
 
 # The game user and the groups it joins are identical for every preset.
 RUN groupadd -f seat \
