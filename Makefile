@@ -243,7 +243,11 @@ _clean-session:
 uninstall: ## Remove the container, its data, and the image; requires CONFIRM=1
 	@test "$(CONFIRM)" = "1" || { printf '%s\n' 'Refusing uninstall: run make uninstall CONFIRM=1'; exit 1; }
 	$(COMPOSE) down -v
-	docker rmi $(IMAGE)
+	@if docker image inspect $(IMAGE) >/dev/null 2>&1; then \
+		docker rmi $(IMAGE); \
+	else \
+		printf 'image %s is already absent\n' '$(IMAGE)'; \
+	fi
 
 # Targets that act on one container need a preset; `help` works without one and
 # the group targets resolve a preset per entry.
