@@ -30,6 +30,8 @@ check_missing() {
 cp "$repo_root/Makefile" "$workdir/Makefile"
 printf 'GAME_ID=zzz\n' >"$workdir/.env.local"
 printf 'GAME_ID=demo\n' >"$workdir/preset.env"
+printf 'GAME_ID=demo\nGPU_VENDOR=nvidia\n' >"$workdir/nvidia.env"
+printf 'GAME_ID=demo\nGPU_VENDOR=amd\nINSTALL_CUDA=0\n' >"$workdir/amd.env"
 
 run_make() {
     (cd "$workdir" && make --no-print-directory -n "$@")
@@ -139,7 +141,35 @@ check_contains 'session shell sets the wayland display' 'WAYLAND_DISPLAY=' "$out
 # Uninstall removes the container, its volume, and the image.
 out="$(run_make uninstall CONFIRM=1 PRESET=preset.env)"
 check_contains 'uninstall uses the explicit preset' '--env-file preset.env' "$out"
-check_contains 'uninstall removes the image' 'docker rmi vulcan/game-stream:local' "$out"
+check_contains 'uninstall removes the image' 'docker rmi vulcan/game-stream:local-' "$out"
+
+# The image tag follows the build inputs, not the game.
+tag_for() {
+    printf '%s\n' "$1" | sed -n 's/.*docker rmi vulcan\/game-stream://p' | head -n 1
+}
+default_tag="$(tag_for "$(run_make uninstall CONFIRM=1)")"
+explicit_tag="$(tag_for "$(run_make uninstall CONFIRM=1 PRESET=nvidia.env)")"
+other_game_tag="$(tag_for "$(run_make uninstall CONFIRM=1 PRESET=preset.env)")"
+variant_tag="$(tag_for "$(run_make uninstall CONFIRM=1 PRESET=amd.env)")"
+
+if [ -n "$default_tag" ] && [ "$default_tag" = "$explicit_tag" ]; then
+    printf 'ok   explicit defaults keep the image tag\n'
+else
+    printf 'FAIL explicit defaults keep the image tag: [%s] vs [%s]\n' "$default_tag" "$explicit_tag" >&2
+    failures=$((failures + 1))
+fi
+if [ "$default_tag" = "$other_game_tag" ]; then
+    printf 'ok   another game reuses the image tag\n'
+else
+    printf 'FAIL another game reuses the image tag: [%s] vs [%s]\n' "$default_tag" "$other_game_tag" >&2
+    failures=$((failures + 1))
+fi
+if [ "$default_tag" != "$variant_tag" ]; then
+    printf 'ok   a different backend gets its own tag\n'
+else
+    printf 'FAIL a different backend gets its own tag: both are [%s]\n' "$default_tag" >&2
+    failures=$((failures + 1))
+fi
 
 # Targets that do not use Compose must work before any configuration exists.
 rm "$workdir/.env.local"

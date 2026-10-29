@@ -2,8 +2,21 @@ SHELL := /bin/bash
 # Select another configuration preset with `make <target> PRESET=<path>`.
 PRESET ?= .env.local
 -include $(PRESET)
+
+# Build inputs; keep the defaults in sync with the build args in compose.yaml.
+GPU_VENDOR ?= nvidia
+INSTALL_CUDA ?= 1
+APOLLO_PKG ?= apollo-git
+APOLLO_COMMIT ?= adc5c5a0bd80831ce495434bb16aee2cd4175fb8
+MIRROR_COUNTRY ?=
+
+# One image per build variant, so a preset never overwrites the image another
+# preset runs on.
+IMAGE_TAG := local-$(shell printf '%s' '$(GPU_VENDOR)|$(INSTALL_CUDA)|$(APOLLO_PKG)|$(APOLLO_COMMIT)|$(MIRROR_COUNTRY)' | sha256sum | cut -c1-12)
+IMAGE := vulcan/game-stream:$(IMAGE_TAG)
+export IMAGE_TAG
+
 COMPOSE = docker compose --env-file $(PRESET) -f compose.yaml -f compose.nvidia.yaml
-IMAGE := vulcan/game-stream:local
 CONTAINER := vulcan-$(GAME_ID)
 VOLUME := vulcan_$(GAME_ID)-data
 

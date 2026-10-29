@@ -10,7 +10,9 @@ services:
         APOLLO_PKG: "${APOLLO_PKG:-apollo-git}"
         APOLLO_COMMIT: "${APOLLO_COMMIT:-adc5c5a0bd80831ce495434bb16aee2cd4175fb8}"
         MIRROR_COUNTRY: "${MIRROR_COUNTRY:-}"
-    image: vulcan/game-stream:local
+    image: "vulcan/game-stream:${IMAGE_TAG:-local}"
+    # Never pull: the tag is built locally for its build variant.
+    pull_policy: never
     container_name: "vulcan-${GAME_ID}"
     init: true
     network_mode: host

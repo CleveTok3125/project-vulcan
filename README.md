@@ -70,6 +70,13 @@ The build pins its external inputs:
   Apollo commit.
 - Rust crates are pinned by `rust/Cargo.lock` and built with `--locked`.
 
+The image tag follows the build inputs: `GPU_VENDOR`, `INSTALL_CUDA`,
+`APOLLO_PKG`, `APOLLO_COMMIT`, and `MIRROR_COUNTRY` are hashed into
+`vulcan/game-stream:local-<hash>`. Presets with the same inputs share one
+image; a preset that changes them builds its own tag instead of overwriting
+the image another preset runs on. `up` never pulls, so it stops with an error
+when that variant has not been built.
+
 CachyOS repositories do not expose an archive snapshot, so packages are
 resolved from the CachyOS repos at build time. The pinned base digest is the
 strongest available pin for those packages.
@@ -200,11 +207,15 @@ The `make` targets pass `compose.nvidia.yaml`; on AMD/Intel hosts use the raw
    GIDs are required. `make config` prints the resolved compose configuration
    and stops at a missing or malformed value.
 
-4. Build the image:
+4. Build the image for the selected preset:
 
    ```bash
    make build
    ```
+
+   The tag follows the build inputs, so one build serves every preset with the
+   same `GPU_VENDOR`, `INSTALL_CUDA`, `APOLLO_PKG`, `APOLLO_COMMIT`, and
+   `MIRROR_COUNTRY`.
 
 5. Start the container:
 
