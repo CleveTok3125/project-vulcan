@@ -180,7 +180,7 @@ if [ -n "$INPUT_NETNS" ]; then
 fi
 
 if [ "${INPUT_BROKER:-1}" = "1" ]; then
-    INPUT_GID="$GID_INPUT" "${netns_cmd[@]}" python3 /usr/local/bin/input-broker.py \
+    INPUT_GID="$GID_INPUT" "${netns_cmd[@]}" /usr/local/bin/vulcan-input-broker \
         >/data/log/input-broker.log 2>&1 &
 fi
 
@@ -198,7 +198,7 @@ if [ "$INPUT_BACKEND" = "xtest" ]; then
         DISPLAY="$INPUT_DISPLAY" \
         bash -c '
             while true; do
-                python3 /usr/local/bin/input-bridge.py \
+                /usr/local/bin/vulcan-input-bridge \
                     >>/data/log/input-bridge.log 2>&1 || true
                 sleep 1
             done

@@ -451,7 +451,7 @@ forwarding path becomes active once gamescope advertises the capability; until
 then keep the client in a mouse mode, where touch arrives as absolute mouse
 events.
 
-`INPUT_BACKEND=xtest` falls back to `input-bridge.py`, which grabs the event
+`INPUT_BACKEND=xtest` falls back to `vulcan-input-bridge`, which grabs the event
 nodes with `EVIOCGRAB` and injects them into gamescope's Xwayland display with
 XTest. With gamescope enabled the bridge targets `:2`; without gamescope it
 targets Sway's Xwayland at `:1`. Override with `INPUT_DISPLAY`. That path
@@ -466,10 +466,14 @@ docker compose exec game tail -f /data/log/vulcan-inputd.log
 
 ### Input broker
 
-`input-broker.py` watches for the fixed inputtino device names and creates
+`vulcan-input-broker` watches for the fixed inputtino device names and creates
 the corresponding event nodes in the container's private `/dev/input`. It
 writes udev database records and emits udev netlink events so libinput can
 hotplug them.
+
+uinput devices live in the shared kernel and carry no marker that names their
+creator, so the broker only takes devices that appeared after it started: the
+nodes another running session created earlier stay in the baseline.
 
 Virtual gamepads are not exposed as host devices; they are handled by the
 XInput proxy in the Wine prefix.

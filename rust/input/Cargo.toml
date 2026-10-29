@@ -1,0 +1,16 @@
+[package]
+name = "vulcan-input"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+libc = "0.2"
+
+[[bin]]
+name = "vulcan-input-broker"
+path = "src/bin/broker.rs"
+
+[[bin]]
+name = "vulcan-input-bridge"
+path = "src/bin/bridge.rs"
