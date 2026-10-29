@@ -31,14 +31,14 @@ VOLUME := vulcan_$(GAME_ID)-data
 # and the group targets report each preset from their own loop.
 GROUP_TARGETS := up-all down-all stop-all restart-all ps-all build-all stats-all uninstall-all
 ifeq ($(MAKELEVEL),0)
-ifeq ($(filter base rm-base images $(GROUP_TARGETS),$(MAKECMDGOALS)),)
+ifeq ($(filter base rm-base images volumes $(GROUP_TARGETS),$(MAKECMDGOALS)),)
 $(info [vulcan] PRESET=$(PRESET))
 endif
 endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help base base-rebuild rm-base images build up rebuild stop down restart logs ps up-all down-all stop-all restart-all ps-all build-all stats-all uninstall-all _check-presets config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
+.PHONY: help base base-rebuild rm-base images volume volumes _volume-name build up rebuild stop down restart logs ps up-all down-all stop-all restart-all ps-all build-all stats-all uninstall-all _check-presets config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -62,6 +62,36 @@ rm-base: ## Remove the base image
 	@images=$$(docker images --format '{{.Repository}}:{{.Tag}}' vulcan/base); \
 	if [ -z "$$images" ]; then printf 'no base image\n'; exit 0; fi; \
 	for image in $$images; do docker rmi "$$image" || exit 1; done
+
+_volume-name:
+	@printf '%s\n' '$(VOLUME)'
+
+volume: ## Show the volume of the selected preset
+	@name="$(VOLUME)"; \
+	if ! docker volume inspect "$$name" >/dev/null 2>&1; then \
+		printf '%s (missing)\n' "$$name"; exit 0; \
+	fi; \
+	docker volume inspect "$$name" --format 'name={{.Name}} mount={{.Mountpoint}}'; \
+	docker volume inspect "$$name" --format 'created={{.CreatedAt}}'; \
+	size=$$(docker system df -v | awk -v v="$$name" '$$1 == v {print $$3}'); \
+	printf 'size=%s\n' "$${size:-unknown}"
+
+volumes: ## List the Vulcan volumes
+	@names=""; \
+	if [ -n "$(strip $(PRESETS))" ]; then \
+		for preset in $(PRESET_LIST); do \
+			names="$$names $$($(MAKE) -s --no-print-directory _volume-name PRESET="$$preset")"; \
+		done; \
+	else \
+		names=$$(docker volume ls --format '{{.Name}}' --filter name=vulcan_); \
+	fi; \
+	sizes=$$(docker system df -v | awk '$$1 ~ /^vulcan_/ {print $$1" "$$3}'); \
+	printf '%-28s %s\n' VOLUME SIZE; \
+	for name in $$names; do \
+		size=$$(printf '%s\n' "$$sizes" | awk -v n="$$name" '$$1 == n {print $$2}'); \
+		[ -n "$$size" ] || size='(missing)'; \
+		printf '%-28s %s\n' "$$name" "$$size"; \
+	done
 
 build: base ## Build the container image
 	$(COMPOSE) build
@@ -218,7 +248,7 @@ uninstall: ## Remove the container, its data, and the image; requires CONFIRM=1
 # Targets that act on one container need a preset; `help` works without one and
 # the group targets resolve a preset per entry.
 KNOWN_TARGETS := $(shell grep -hoE '^[a-zA-Z0-9_-]+:' $(MAKEFILE_LIST) | tr -d ':')
-CONFIG_GOALS := $(filter-out help base base-rebuild rm-base images $(GROUP_TARGETS),$(filter $(KNOWN_TARGETS),$(MAKECMDGOALS)))
+CONFIG_GOALS := $(filter-out help base base-rebuild rm-base images volumes $(GROUP_TARGETS),$(filter $(KNOWN_TARGETS),$(MAKECMDGOALS)))
 ifneq ($(CONFIG_GOALS),)
 ifeq ($(wildcard $(PRESET)),)
 $(error preset $(PRESET) does not exist: set PRESET=<path>)

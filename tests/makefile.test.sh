@@ -192,6 +192,15 @@ else
     failures=$((failures + 1))
 fi
 
+# Volume targets.
+vol_out="$(cd "$workdir" && make --no-print-directory volume 2>/dev/null || true)"
+check_contains 'volume names the preset volume' 'vulcan_zzz-data' "$vol_out"
+
+vols_out="$(cd "$workdir" && make --no-print-directory volumes \
+    PRESETS=".env.local:preset.env" 2>/dev/null || true)"
+check_contains 'volumes lists the first preset' 'vulcan_zzz-data' "$vols_out"
+check_contains 'volumes lists the second preset' 'vulcan_demo-data' "$vols_out"
+
 # Image management targets.
 out="$(run_make rm-base)"
 check_contains 'rm-base removes the base image' 'docker rmi' "$out"
@@ -243,6 +252,13 @@ fi
 
 # Targets that do not use Compose must work before any configuration exists.
 rm "$workdir/.env.local"
+if (cd "$workdir" && make --no-print-directory volumes >/dev/null 2>&1); then
+    printf 'ok   volumes works without a preset\n'
+else
+    printf 'FAIL volumes works without a preset\n' >&2
+    failures=$((failures + 1))
+fi
+
 if (cd "$workdir" && make --no-print-directory images >/dev/null 2>&1); then
     printf 'ok   images works without a preset\n'
 else
