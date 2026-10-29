@@ -27,7 +27,7 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
 
 FROM base AS rust-builder
 RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
-    pacman -Syu --noconfirm --needed --disable-download-timeout rust gcc libei
+    pacman -Syu --noconfirm --needed --disable-download-timeout rust gcc libei libx11 libxtst
 COPY rust /build
 WORKDIR /build
 RUN --mount=type=cache,target=/root/.cargo/registry,sharing=locked \
