@@ -205,7 +205,8 @@ uninstall: ## Remove the container, its data, and the image; requires CONFIRM=1
 
 # Targets that act on one container need a preset; `help` works without one and
 # the group targets resolve a preset per entry.
-CONFIG_GOALS := $(filter-out help base base-rebuild images $(GROUP_TARGETS),$(MAKECMDGOALS))
+KNOWN_TARGETS := $(shell grep -hoE '^[a-zA-Z0-9_-]+:' $(MAKEFILE_LIST) | tr -d ':')
+CONFIG_GOALS := $(filter-out help base base-rebuild images $(GROUP_TARGETS),$(filter $(KNOWN_TARGETS),$(MAKECMDGOALS)))
 ifneq ($(CONFIG_GOALS),)
 ifeq ($(wildcard $(PRESET)),)
 $(error preset $(PRESET) does not exist: set PRESET=<path>)
