@@ -54,9 +54,15 @@ check_missing 'explicit env file replaces default' '--env-file .env.local' "$out
 check_contains 'explicit preset volume' 'vulcan_demo-data' "$(run_make clean-overlay PRESET=preset.env)"
 check_contains 'explicit preset compose down' '--env-file preset.env' "$(run_make down PRESET=preset.env)"
 
-# A missing preset is marked in the report.
-out="$(run_make up PRESET=absent.env)"
-check_contains 'missing preset is marked' '[vulcan] PRESET=absent.env (missing)' "$out"
+# A missing preset is rejected before anything runs.
+out="$(run_make up PRESET=absent.env 2>&1 || true)"
+check_contains 'missing preset is rejected' 'preset absent.env does not exist' "$out"
+check_missing 'missing preset starts nothing' 'docker compose' "$out"
+
+# A preset without GAME_ID is rejected as well.
+printf 'GAME_MODE=windowed\n' >"$workdir/nogame.env"
+out="$(run_make up PRESET=nogame.env 2>&1 || true)"
+check_contains 'preset without GAME_ID is rejected' 'does not define GAME_ID' "$out"
 
 # Group targets report and start every listed preset.
 out="$(run_make up-all PRESETS=".env.local:preset.env")"
@@ -137,6 +143,9 @@ check_contains 'uninstall removes the image' 'docker rmi vulcan/game-stream:loca
 
 # Targets that do not use Compose must work before any configuration exists.
 rm "$workdir/.env.local"
+out="$(run_make stats 2>&1 || true)"
+check_contains 'container targets need a preset' 'preset .env.local does not exist' "$out"
+
 out="$(run_help)"
 check_contains 'help without env file' 'Show available targets' "$out"
 check_contains 'help lists the group targets' 'up-all' "$out"

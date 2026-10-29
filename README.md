@@ -102,10 +102,12 @@ make up PRESET=.env.zzz
 
 `PRESET` selects one preset for every target that acts on a single container,
 including `build`, `logs`, `clean-*`, and `uninstall`. The value is a path
-relative to the repository root; `.env.local` is the default. Each `GAME_ID` gets its own container, compose project, and
-volume, so presets with different `GAME_ID` values run side by side. Each
-target prints the selected file, for example `[vulcan] PRESET=.env.zzz`, and
-marks it as `(missing)` when it does not exist.
+relative to the repository root; `.env.local` is the default. Each `GAME_ID`
+gets its own container, compose project, and volume, so presets with different
+`GAME_ID` values run side by side. Each target prints the selected file, for
+example `[vulcan] PRESET=.env.zzz`. A target that acts on one container stops
+when the preset file is missing or does not set `GAME_ID`; `help` and the
+`*-all` targets keep working without one.
 
 `GAME_ID`, `GAME_DIR`, `GAME_EXE`, `RENDER_NODE`, and `SPRITZ_DIR` are
 required. `GAME_DIR` is mounted at `/games-ro/<GAME_ID>`; `GAME_EXE` is the

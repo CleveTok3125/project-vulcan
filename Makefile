@@ -2,7 +2,6 @@ SHELL := /bin/bash
 # Select another configuration preset with `make <target> PRESET=<path>`.
 PRESET ?= .env.local
 -include $(PRESET)
-GAME_ID ?= zzz
 COMPOSE = docker compose --env-file $(PRESET) -f compose.yaml -f compose.nvidia.yaml
 IMAGE := vulcan/game-stream:local
 CONTAINER := vulcan-$(GAME_ID)
@@ -13,7 +12,7 @@ VOLUME := vulcan_$(GAME_ID)-data
 GROUP_TARGETS := up-all down-all ps-all
 ifeq ($(MAKELEVEL),0)
 ifeq ($(filter $(GROUP_TARGETS),$(MAKECMDGOALS)),)
-$(info [vulcan] PRESET=$(PRESET)$(if $(wildcard $(PRESET)),, (missing)))
+$(info [vulcan] PRESET=$(PRESET))
 endif
 endif
 
@@ -142,3 +141,15 @@ uninstall: ## Remove the container, its data, and the image; requires CONFIRM=1
 	@test "$(CONFIRM)" = "1" || { printf '%s\n' 'Refusing uninstall: run make uninstall CONFIRM=1'; exit 1; }
 	$(COMPOSE) down -v
 	docker rmi $(IMAGE)
+
+# Targets that act on one container need a preset; `help` works without one and
+# the group targets resolve a preset per entry.
+CONFIG_GOALS := $(filter-out help up-all down-all ps-all,$(MAKECMDGOALS))
+ifneq ($(CONFIG_GOALS),)
+ifeq ($(wildcard $(PRESET)),)
+$(error preset $(PRESET) does not exist: set PRESET=<path>)
+endif
+ifeq ($(strip $(GAME_ID)),)
+$(error preset $(PRESET) does not define GAME_ID)
+endif
+endif
