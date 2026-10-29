@@ -66,6 +66,13 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
         libinput \
         ffnvcodec-headers
 
+# aria2c downloads each package over several connections, which matters for
+# the multi-gigabyte CUDA package the Apollo stage pulls. It replaces pacman's
+# parallel package download, so keep it to one transfer at a time.
+RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
+    pacman -S --noconfirm --needed --disable-download-timeout aria2 \
+    && printf '\nXferCommand = /usr/bin/aria2c --console-log-level=error -c -x 16 -s 16 -k 1M --file-allocation=none -o %%o %%u\n' >> /etc/pacman.conf
+
 # The game user and the groups it joins are identical for every preset.
 RUN groupadd -f seat \
     && groupadd -f -g 1000 game \
