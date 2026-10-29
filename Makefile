@@ -5,14 +5,21 @@ PRESET ?= .env.local
 
 # Build inputs; keep the defaults in sync with the build args in compose.yaml.
 GPU_VENDOR ?= nvidia
-INSTALL_CUDA ?= 1
 APOLLO_PKG ?= apollo-git
 APOLLO_COMMIT ?= adc5c5a0bd80831ce495434bb16aee2cd4175fb8
 MIRROR_COUNTRY ?=
 
+# The shared environment image is built once per host; the game image adds the
+# vendor packages, Apollo, and the session parts on top of it.
+BASE_DOCKERFILE := docker/base.Dockerfile
+BASE_HASH := $(shell sha256sum $(BASE_DOCKERFILE) | cut -c1-12)
+BASE_TAG := local-$(shell printf '%s|%s' "$(MIRROR_COUNTRY)" "$(BASE_HASH)" | sha256sum | cut -c1-12)
+BASE_IMAGE := vulcan/base:$(BASE_TAG)
+export BASE_IMAGE
+
 # One image per build variant, so a preset never overwrites the image another
 # preset runs on.
-IMAGE_TAG := local-$(shell printf '%s' '$(GPU_VENDOR)|$(INSTALL_CUDA)|$(APOLLO_PKG)|$(APOLLO_COMMIT)|$(MIRROR_COUNTRY)' | sha256sum | cut -c1-12)
+IMAGE_TAG := local-$(shell printf '%s' '$(BASE_TAG)|$(GPU_VENDOR)|$(APOLLO_PKG)|$(APOLLO_COMMIT)' | sha256sum | cut -c1-12)
 IMAGE := vulcan/game-stream:$(IMAGE_TAG)
 export IMAGE_TAG
 
@@ -24,21 +31,27 @@ VOLUME := vulcan_$(GAME_ID)-data
 # and the group targets report each preset from their own loop.
 GROUP_TARGETS := up-all down-all stop-all restart-all ps-all build-all stats-all
 ifeq ($(MAKELEVEL),0)
-ifeq ($(filter $(GROUP_TARGETS),$(MAKECMDGOALS)),)
+ifeq ($(filter base $(GROUP_TARGETS),$(MAKECMDGOALS)),)
 $(info [vulcan] PRESET=$(PRESET))
 endif
 endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build up rebuild stop down restart logs ps up-all down-all stop-all restart-all ps-all build-all stats-all _check-presets config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
+.PHONY: help base build up rebuild stop down restart logs ps up-all down-all stop-all restart-all ps-all build-all stats-all _check-presets config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 	@printf '\nPRESET selects the configuration preset (default: .env.local).\n'
 	@printf 'PRESETS lists several presets for the *-all targets, separated by colons.\n'
 
-build: ## Build the container image
+base: ## Build the shared environment image for this host
+	@docker image inspect $(BASE_IMAGE) >/dev/null 2>&1 || \
+		docker build -f $(BASE_DOCKERFILE) \
+			--build-arg MIRROR_COUNTRY="$(MIRROR_COUNTRY)" \
+			-t $(BASE_IMAGE) .
+
+build: base ## Build the container image
 	$(COMPOSE) build
 
 up: ## Start the container in the background
@@ -181,7 +194,7 @@ uninstall: ## Remove the container, its data, and the image; requires CONFIRM=1
 
 # Targets that act on one container need a preset; `help` works without one and
 # the group targets resolve a preset per entry.
-CONFIG_GOALS := $(filter-out help $(GROUP_TARGETS),$(MAKECMDGOALS))
+CONFIG_GOALS := $(filter-out help base $(GROUP_TARGETS),$(MAKECMDGOALS))
 ifneq ($(CONFIG_GOALS),)
 ifeq ($(wildcard $(PRESET)),)
 $(error preset $(PRESET) does not exist: set PRESET=<path>)

@@ -61,6 +61,19 @@ package and Apollo build layers.
 The first build after a Dockerfile package-list change still downloads the new
 packages once. Do not use `--no-cache` for normal rebuilds.
 
+### Shared base image
+
+`make base` builds `vulcan/base:<hash>` from `docker/base.Dockerfile`: the
+mirror setup, the runtime packages, the build tooling, and the game user. The
+game image starts from it and adds only the vendor packages, Apollo, the native
+and Rust artifacts, and the configuration.
+
+The base tag hashes that file and `MIRROR_COUNTRY`; the game tag hashes the base
+tag, `GPU_VENDOR`, `APOLLO_PKG`, and `APOLLO_COMMIT`. Editing scripts or config
+rebuilds the last layers only, an Apollo bump rebuilds the Apollo stage only,
+and a package change rebuilds the base and everything above it. `uninstall`
+removes the game image; remove a base image with `docker rmi <tag>`.
+
 ## Reproducible builds
 
 The build pins its external inputs:
@@ -70,8 +83,8 @@ The build pins its external inputs:
   Apollo commit.
 - Rust crates are pinned by `rust/Cargo.lock` and built with `--locked`.
 
-The image tag follows the build inputs: `GPU_VENDOR`, `INSTALL_CUDA`,
-`APOLLO_PKG`, `APOLLO_COMMIT`, and `MIRROR_COUNTRY` are hashed into
+The image tag follows the build inputs: the base tag, `GPU_VENDOR`,
+`APOLLO_PKG`, and `APOLLO_COMMIT` are hashed into
 `vulcan/game-stream:local-<hash>`. Presets with the same inputs share one
 image; a preset that changes them builds its own tag instead of overwriting
 the image another preset runs on. `up` never pulls, so it stops with an error
@@ -219,8 +232,7 @@ The `make` targets pass `compose.nvidia.yaml`; on AMD/Intel hosts use the raw
    ```
 
    The tag follows the build inputs, so one build serves every preset with the
-   same `GPU_VENDOR`, `INSTALL_CUDA`, `APOLLO_PKG`, `APOLLO_COMMIT`, and
-   `MIRROR_COUNTRY`.
+   same base image, `GPU_VENDOR`, `APOLLO_PKG`, and `APOLLO_COMMIT`.
 
 5. Start the container:
 
@@ -286,7 +298,6 @@ render node is not `renderD128`.
 
 ```dotenv
 GPU_VENDOR=amd
-INSTALL_CUDA=0
 APOLLO_ENCODER=vaapi
 APOLLO_ADAPTER=/dev/dri/renderD128
 ```

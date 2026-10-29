@@ -28,10 +28,11 @@ check_missing() {
 }
 
 cp "$repo_root/Makefile" "$workdir/Makefile"
+cp -r "$repo_root/docker" "$workdir/docker"
 printf 'GAME_ID=zzz\n' >"$workdir/.env.local"
 printf 'GAME_ID=demo\n' >"$workdir/preset.env"
 printf 'GAME_ID=demo\nGPU_VENDOR=nvidia\n' >"$workdir/nvidia.env"
-printf 'GAME_ID=demo\nGPU_VENDOR=amd\nINSTALL_CUDA=0\n' >"$workdir/amd.env"
+printf 'GAME_ID=demo\nGPU_VENDOR=amd\n' >"$workdir/amd.env"
 
 run_make() {
     (cd "$workdir" && make --no-print-directory -n "$@")
@@ -157,6 +158,27 @@ check_contains 'session shell sets the wayland display' 'WAYLAND_DISPLAY=' "$out
 out="$(run_make uninstall CONFIRM=1 PRESET=preset.env)"
 check_contains 'uninstall uses the explicit preset' '--env-file preset.env' "$out"
 check_contains 'uninstall removes the image' 'docker rmi vulcan/game-stream:local-' "$out"
+
+# The shared base image is built once and reused by the game image.
+out="$(run_make base)"
+check_contains 'base builds from its own file' 'docker/base.Dockerfile' "$out"
+check_contains 'base has its own tag' 'vulcan/base:local-' "$out"
+expected_tag="local-$(printf '%s|%s' "" "$(sha256sum "$workdir/docker/base.Dockerfile" | cut -c1-12)" | sha256sum | cut -c1-12)"
+check_contains 'base tag follows the base file' "vulcan/base:${expected_tag}" "$out"
+check_missing 'base ignores the game preset' '--env-file' "$out"
+printf '# local change\n' >>"$workdir/docker/base.Dockerfile"
+out_changed="$(run_make base)"
+check_missing 'base tag changes with the base file' "vulcan/base:${expected_tag}" "$out_changed"
+
+out="$(run_make build)"
+base_line="$(printf '%s\n' "$out" | grep -n 'docker/base.Dockerfile' | head -n 1 | cut -d: -f1)"
+game_line="$(printf '%s\n' "$out" | grep -n ' compose .*build' | head -n 1 | cut -d: -f1)"
+if [ -n "$base_line" ] && [ -n "$game_line" ] && [ "$base_line" -lt "$game_line" ]; then
+    printf 'ok   build prepares the base image first\n'
+else
+    printf 'FAIL build prepares the base image first: base=%s game=%s\n' "$base_line" "$game_line" >&2
+    failures=$((failures + 1))
+fi
 
 # The image tag follows the build inputs, not the game.
 tag_for() {
