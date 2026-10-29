@@ -92,6 +92,18 @@ out="$(run_make build-all PRESETS="preset.env")"
 check_contains 'build-all builds the preset' ' build' "$out"
 check_contains 'build-all uses the preset' '--env-file preset.env' "$out"
 
+if (cd "$workdir" && make --no-print-directory uninstall-all PRESETS="preset.env" >/dev/null 2>&1); then
+    printf 'FAIL uninstall-all requires CONFIRM\n' >&2
+    failures=$((failures + 1))
+else
+    printf 'ok   uninstall-all requires CONFIRM\n'
+fi
+
+out="$(run_make uninstall-all CONFIRM=1 PRESETS=".env.local:preset.env")"
+check_contains 'uninstall-all drops the first volume' '--env-file .env.local' "$out"
+check_contains 'uninstall-all drops the second volume' '--env-file preset.env' "$out"
+check_contains 'uninstall-all removes the image' 'docker rmi vulcan/game-stream:' "$out"
+
 out="$(run_make stats-all PRESETS=".env.local:preset.env")"
 check_contains 'stats-all inspects the first container' 'vulcan-zzz' "$out"
 check_contains 'stats-all inspects the second container' 'vulcan-demo' "$out"

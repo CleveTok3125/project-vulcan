@@ -29,7 +29,7 @@ VOLUME := vulcan_$(GAME_ID)-data
 
 # Show the selected preset once per invocation; `watch` calls make in a loop
 # and the group targets report each preset from their own loop.
-GROUP_TARGETS := up-all down-all stop-all restart-all ps-all build-all stats-all
+GROUP_TARGETS := up-all down-all stop-all restart-all ps-all build-all stats-all uninstall-all
 ifeq ($(MAKELEVEL),0)
 ifeq ($(filter base images prune-images $(GROUP_TARGETS),$(MAKECMDGOALS)),)
 $(info [vulcan] PRESET=$(PRESET))
@@ -38,7 +38,7 @@ endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help base base-rebuild images build up rebuild stop down restart logs ps up-all down-all stop-all restart-all ps-all build-all stats-all _check-presets config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
+.PHONY: help base base-rebuild images build up rebuild stop down restart logs ps up-all down-all stop-all restart-all ps-all build-all stats-all uninstall-all _check-presets config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -127,6 +127,13 @@ build-all: _check-presets ## Build the image for every preset listed in PRESETS
 	@for preset in $(PRESET_LIST); do \
 		printf '[vulcan] PRESET=%s\n' "$$preset"; \
 		$(MAKE) --no-print-directory build PRESET="$$preset" || exit 1; \
+	done
+
+uninstall-all: _check-presets ## Remove the container, volume, and image of every preset; requires CONFIRM=1
+	@test "$(CONFIRM)" = "1" || { printf '%s\n' 'Refusing uninstall: run make uninstall-all CONFIRM=1'; exit 1; }
+	@for preset in $(PRESET_LIST); do \
+		printf '[vulcan] PRESET=%s\n' "$$preset"; \
+		$(MAKE) --no-print-directory uninstall CONFIRM=1 PRESET="$$preset" || exit 1; \
 	done
 
 stats-all: _check-presets ## Show resource usage for every preset listed in PRESETS

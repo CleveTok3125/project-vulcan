@@ -178,9 +178,10 @@ make build-all PRESETS=".env.zzz:.env.other"
 make down-all PRESETS=".env.zzz:.env.other"
 ```
 
-The group targets cover `up`, `down`, `stop`, `restart`, `ps`, `build`, and
-`stats`. Targets that act on one container at a time, such as `logs`, `shell`,
-`btop`, `nvtop`, `watch`, `clean-*`, and `uninstall`, stay per preset.
+The group targets cover `up`, `down`, `stop`, `restart`, `ps`, `build`,
+`stats`, and `uninstall` (which needs `CONFIRM=1`). Targets that act on one
+container at a time, such as `logs`, `shell`, `btop`, `nvtop`, `watch`, and
+`clean-*`, stay per preset.
 
 Set a distinct `APOLLO_PORT` in every preset that runs at the same time,
 because Apollo binds on the host network; the web UI listens on
