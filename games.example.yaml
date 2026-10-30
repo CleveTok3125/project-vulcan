@@ -1,0 +1,26 @@
+# Game catalog for a multi-game session.
+#
+# Copy it and set source to the host directory that contains the executable:
+#   cp games.example.yaml games.yaml
+#
+# id:           path segment, unique within the session
+# name:         label shown in Apollo/Artemis
+# source:       absolute host directory mounted read-only at /games-ro/<id>
+# exe:          executable path relative to source and /games/<id>
+# reset_paths:  paths relative to source, cleared once per Wine prefix
+# wine_source:  optional absolute Wine tree mounted at /wine/<id>
+# uuid:         optional stable app UUID; empty derives one from id
+games:
+  - id: demo
+    name: Demo Game
+    source: /srv/games/demo
+    exe: Demo.exe
+
+  - id: other
+    name: Other Game
+    source: /srv/games/other
+    exe: Other.exe
+    wine_source: /srv/wine/other
+    reset_paths:
+      - Data/Login
+      - Data/Cache

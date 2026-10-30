@@ -197,7 +197,7 @@ impl Backend {
         let gamepad_path = std::env::var("VULCAN_GAMEPAD_STATE")
             .map(PathBuf::from)
             .unwrap_or_else(|_| {
-                PathBuf::from("/data/prefix/drive_c/vulcan-gamepad.bin")
+                PathBuf::from("/data/vulcan-gamepad.bin")
             });
         let gamepad_enabled = gamepad_enabled(std::env::var("INPUT_GAMEPAD").ok().as_deref());
         let backend = Self {

@@ -1,4 +1,4 @@
-name: "vulcan-${GAME_ID}"
+name: "vulcan-${SESSION_ID}"
 
 services:
   game:
@@ -12,7 +12,7 @@ services:
     image: "vulcan/game-stream:${IMAGE_TAG:-local}"
     # Never pull: the tag is built locally for its build variant.
     pull_policy: never
-    container_name: "vulcan-${GAME_ID}"
+    container_name: "vulcan-${SESSION_ID}"
     init: true
     network_mode: host
     read_only: true
@@ -24,7 +24,7 @@ services:
       - /tmp:size=2g
       - /run:size=512m
       - /var:size=1g
-      # Overlay mount points for /games/<GAME_ID>; the root filesystem is read-only.
+      # Overlay mount points for each catalog game; the root filesystem is read-only.
       - /games:size=64m
 
     # Only the selected render node is exposed. Never add /dev/dri/card*.
@@ -54,20 +54,17 @@ services:
     # the game process by the entrypoint. They are not added with group_add,
     # because input and uinput often share the same host GID.
     volumes:
-      - "${GAME_DIR:?set GAME_DIR in the selected env file}:/games-ro/${GAME_ID:?}:ro"
       - "${SPRITZ_DIR:?set SPRITZ_DIR in the selected env file}:/data/spritz-wine-tkg:ro"
       - "${DXVK_HOST_DIR:-/usr/share/dxvk}:/data/dxvk:ro"
+      - ".generated:/config/games:ro"
       - "game-data:/data"
 
     environment:
-      GAME_ID: "${GAME_ID:?set GAME_ID in the selected env file}"
+      SESSION_ID: "${SESSION_ID:?set SESSION_ID in the selected env file}"
+      GAMES_CATALOG_PATH: "/config/games/games.json"
       GAME_WIDTH: "${GAME_WIDTH:-1920}"
       GAME_HEIGHT: "${GAME_HEIGHT:-1080}"
       GAME_FPS: "${GAME_FPS:-144}"
-      GAME_EXE: "${GAME_EXE:?set GAME_EXE in the selected env file}"
-      GAME_APP_NAME: "${GAME_APP_NAME:-}"
-      GAME_APP_UUID: "${GAME_APP_UUID:-}"
-      GAME_RESET_PATHS: "${GAME_RESET_PATHS:-}"
       GAMESCOPE_ENABLED: "${GAMESCOPE_ENABLED:-1}"
       GAMESCOPE_RT: "${GAMESCOPE_RT:-0}"
       GAMESCOPE_GRAB_CURSOR: "${GAMESCOPE_GRAB_CURSOR:-1}"
@@ -110,6 +107,6 @@ services:
         hard: -1
 
 volumes:
-  # Each game keeps its own Wine prefix and overlay writes.
+  # Each session keeps its Wine prefixes and overlay writes.
   game-data:
-    name: "vulcan_${GAME_ID:?}-data"
+    name: "vulcan_${SESSION_ID:?}-data"

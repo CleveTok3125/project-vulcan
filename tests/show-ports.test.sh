@@ -22,7 +22,7 @@ check_contains() {
 printf 'APOLLO_PORT=48006\n' >"$workdir/first.env"
 printf 'APOLLO_PORT=47989\n' >"$workdir/second.env"
 printf 'APOLLO_PORT=not-a-port\n' >"$workdir/invalid.env"
-printf 'GAME_ID=demo\n' >"$workdir/default.env"
+printf 'SESSION_ID=demo\n' >"$workdir/default.env"
 
 out="$("$script" "$workdir/first.env" "$workdir/second.env")"
 check_contains "header names the ports" 'HTTPS' "$out"

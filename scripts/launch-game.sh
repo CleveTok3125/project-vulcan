@@ -1,9 +1,52 @@
 #!/bin/bash
 set -Eeuo pipefail
 
+# The Apollo app list calls this script with the selected catalog game id.
+GAME_ID="${1:-}"
+if [ -z "$GAME_ID" ]; then
+    printf 'usage: %s <game_id>\n' "$(basename "$0")" >&2
+    exit 2
+fi
+
+# shellcheck source=game-lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/game-lib.sh"
+
+GAMES_CATALOG_PATH="${GAMES_CATALOG_PATH:-/config/games/games.json}"
+GAMES_MOUNT="${GAMES_MOUNT:-/games}"
+WINE_MOUNT="${WINE_MOUNT:-/wine}"
+PREFIX_ROOT="${PREFIX_ROOT:-/data/prefix}"
+VULCAN_RUN_DIR="${VULCAN_RUN_DIR:-/data/run}"
+
+validate_games_catalog "$GAMES_CATALOG_PATH" || exit 1
+
+game_name="$(game_field "$GAMES_CATALOG_PATH" "$GAME_ID" name)"
+if [ -z "$game_name" ]; then
+    printf '[vulcan] game not found: %s\n' "$GAME_ID" >&2
+    exit 1
+fi
+printf '[vulcan] starting %s (%s)\n' "$game_name" "$GAME_ID" >&2
+
+game_exe_rel="$(game_field "$GAMES_CATALOG_PATH" "$GAME_ID" exe)"
+export GAME_ID
+export GAME_EXE="${GAMES_MOUNT}/${GAME_ID}/${game_exe_rel}"
+GAME_RESET_PATHS="$(game_reset_paths "$GAMES_CATALOG_PATH" "$GAME_ID" | paste -sd: -)"
+export GAME_RESET_PATHS
+export WINEPREFIX="${WINEPREFIX:-${PREFIX_ROOT}/${GAME_ID}}"
+if [ -n "$(game_field "$GAMES_CATALOG_PATH" "$GAME_ID" wine_source)" ]; then
+    export WINE_ROOT="${WINE_MOUNT}/${GAME_ID}"
+fi
+
+# One container owns one display, audio sink, and input socket. Keep one game
+# process at a time; the lock survives the exec into Wine.
+install -d -m 0755 "$VULCAN_RUN_DIR"
+exec 9>"$VULCAN_RUN_DIR/game.lock"
+if ! flock -n 9; then
+    printf '[vulcan] another game is already running\n' >&2
+    exit 1
+fi
+
 export HOME="${HOME:-/data/home}"
 export XDG_DATA_HOME="${XDG_DATA_HOME:-/data/home/.local/share}"
-export WINEPREFIX="${WINEPREFIX:-/data/prefix}"
 export WINE_ROOT="${WINE_ROOT:-${PROTONPATH:-/data/spritz-wine-tkg}}"
 export UMU_USE_STEAM="${UMU_USE_STEAM:-1}"
 export WINEDEBUG="${WINEDEBUG:--all}"
@@ -40,7 +83,6 @@ fi
 
 DXVK_DIR="${DXVK_DIR:-/data/dxvk}"
 
-GAME_EXE="${GAME_EXE:?set GAME_EXE in the env file}"
 GAME_WIDTH="${GAME_WIDTH:-1920}"
 GAME_HEIGHT="${GAME_HEIGHT:-1080}"
 GAME_FPS="${GAME_FPS:-144}"
@@ -127,6 +169,8 @@ if [ "$INPUT_GAMEPAD" = "1" ]; then
     else
         printf '[vulcan] XInput proxy not found: %s; gamepad disabled\n' "$XINPUT_DLL" >&2
     fi
+    ln -sfn "${VULCAN_GAMEPAD_STATE:-/data/vulcan-gamepad.bin}" \
+        "$WINEPREFIX/drive_c/vulcan-gamepad.bin"
 fi
 
 if [ "$GAMESCOPE_ENABLED" = "1" ]; then

@@ -2,9 +2,10 @@
 
 Containerized headless game streaming for Apollo.
 
-One container runs one game on a private headless Sway display. Apollo
-captures that display with `capture=wlr`, and gamescope can host the game as a
-fullscreen client. The host's graphical session is not used.
+One container runs a session with one or more games on a private headless Sway
+display. Apollo lists every catalog game as an app and starts the selected one.
+gamescope hosts the game as a fullscreen client. The host's graphical session
+is not used.
 
 ## Architecture
 
@@ -12,9 +13,10 @@ fullscreen client. The host's graphical session is not used.
 Docker (rootful)
 └─ game container
    ├─ Sway HEADLESS-1 1920x1080@144
-   ├─ gamescope (nested Wayland client, optional)
-   │  └─ wine + game
    ├─ Apollo (capture=wlr, NVENC)
+   │  └─ app per catalog game
+   ├─ gamescope (nested Wayland client, optional)
+   │  └─ wine + selected game
    ├─ PipeWire null sink
    └─ vulcan-inputd (socket -> gamescope EIS)
 ```
@@ -37,12 +39,14 @@ which is not available in this container.
 - NVIDIA driver, or AMD/Intel Mesa drivers; the image ships the NVIDIA
   userland libraries, so no NVIDIA Container Toolkit is needed.
 - A host user with access to the Docker daemon.
-- Game files available under a host directory that can be mounted read-only.
+- Game files available under host directories that can be mounted read-only.
+- `jq` and `yq` (`go-yq`) on the host to validate and convert the game
+  catalog: `sudo pacman -S jq go-yq`.
 - Spritz-Wine-TkG, a Proton tree, or a distribution Wine tree available on
   the host under `SPRITZ_DIR`; it is mounted read-only at
   `/data/spritz-wine-tkg`.
-- A writable Wine prefix under `/data/prefix`; the container creates it on
-  the first game launch.
+- A writable Wine prefix per game under `/data/prefix/<game>`; the container
+  creates it on the first game launch.
 - `WINE_ROOT` points at a Wine tree with `bin/wine64` or, for Wine 11 and
   later, `bin/wine`.
 
@@ -79,9 +83,9 @@ container uses it.
 with aria2c. Everything else, including repository databases and parallel
 downloads, uses pacman's default downloader.
 
-Calling Compose without `make`, such as the AMD/Intel form above, needs the
-base image first: run `make base` and pass `BASE_IMAGE` to the build, or build
-through `make`.
+Calling Compose without `make` needs the base image first and the generated
+catalog files: run `make base`, `make config`, then pass
+`-f .generated/compose.games.yaml` explicitly.
 
 `make rm-base` removes the base image; the next build recreates it.
 `make images` lists the Vulcan images, and `make base-rebuild CONFIRM=1`
@@ -111,79 +115,93 @@ Update these together when intentionally upgrading the image.
 
 ## Configuration
 
-The `.env.zzz.example` preset describes one game on one host, with the
-host-specific lines marked.
+The `.env.multi.example` preset describes one session on one host, with the
+host-specific lines marked. `games.example.yaml` is the game catalog template.
 
 ```bash
-cp .env.zzz.example .env.local
-$EDITOR .env.local
+cp .env.multi.example .env.local
+cp games.example.yaml games.yaml
+$EDITOR .env.local games.yaml
+make config
 ```
 
-The local file is ignored by git. Use it explicitly:
+Both local files are ignored by git. `make` converts `games.yaml` to
+`.generated/games.json` and `.generated/compose.games.yaml`; Compose mounts the
+generated JSON and one read-only bind for every catalog game.
 
-```bash
-docker compose --env-file .env.local -f compose.yaml -f compose.nvidia.yaml up -d
+`SESSION_ID`, `GAMES_CATALOG`, `RENDER_NODE`, and `SPRITZ_DIR` are required.
+`SESSION_ID` names the compose project, container `vulcan-<SESSION_ID>`, volume
+`vulcan_<SESSION_ID>-data`, and the default Apollo host name
+`Vulcan-<SESSION_ID>`.
+
+### Game catalog
+
+`games.yaml` is the source of truth:
+
+```yaml
+games:
+  - id: demo
+    name: Demo Game
+    source: /srv/games/demo
+    exe: Demo.exe
+
+  - id: other
+    name: Other Game
+    source: /srv/games/other
+    exe: Other.exe
+    wine_source: /srv/wine/other
+    reset_paths:
+      - Data/Login
+      - Data/Cache
 ```
 
-Keep one file per game or host profile and select it with `P`:
+- `id` is unique, safe as a path segment, and identifies the overlay, prefix,
+  Apollo app, and log lines.
+- `name` is the app label shown to clients.
+- `source` is an absolute host directory. Only catalog directories are
+  mounted, read-only, at `/games-ro/<id>`.
+- `exe` is relative to `source`; the writable overlay path is
+  `/games/<id>/<exe>`.
+- `reset_paths` are relative to the game directory and are removed once per
+  Wine prefix, never on the host.
+- `wine_source` is optional. Set it to an absolute host Wine tree when games
+  need different Wine builds; it is mounted at `/wine/<id>` and overrides the
+  session `SPRITZ_DIR`. Without it, every game uses the session Wine tree.
+- `uuid` is optional. Empty derives a stable UUID from `id`; set it to keep an
+  existing client app identity.
+
+Apollo reads one app per catalog entry from `/data/apollo/apps.json`. Selecting
+an app starts `launch-game.sh <id>`, which resolves that game's overlay, Wine
+prefix, and reset paths. The container runs one game at a time; a second app
+start exits while the first holds the session lock.
+
+### Sessions
+
+`P` selects one preset or a colon-separated list. The value is a path relative
+to the repository root; `.env.local` is the default. Each `SESSION_ID` gets its
+own container, compose project, and volume, so different sessions run side by
+side:
 
 ```bash
-cp .env.zzz.example .env.zzz
-$EDITOR .env.zzz
-make up P=.env.zzz
-```
-
-`P` takes one preset or a colon-separated list. The value is a path relative
-to the repository root; `.env.local` is the default. Each `GAME_ID` gets its
-own container, compose project, and volume, so presets with different
-`GAME_ID` values run side by side. Every target prints the selection, for
-example `[vulcan] P=.env.zzz`. A target that acts on one container stops when
-the preset file is missing or does not set `GAME_ID`; `help` and the global
-targets keep working without one.
-
-`GAME_ID`, `GAME_DIR`, `GAME_EXE`, `RENDER_NODE`, and `SPRITZ_DIR` are
-required. `GAME_DIR` is mounted at `/games-ro/<GAME_ID>`; `GAME_EXE` is the
-executable path inside the writable overlay view at `/games/<GAME_ID>`.
-
-### Game identity
-
-`GAME_ID` names everything derived from the game: the read-only mount point,
-the overlay directories, the data volume `vulcan_<GAME_ID>-data`, the compose
-project and container `vulcan-<GAME_ID>`, and the default Apollo host name
-`Vulcan-<GAME_ID>`.
-
-`GAME_APP_NAME` is the app label shown to clients. `GAME_APP_UUID` identifies
-that app entry; leave it empty to derive a stable UUID from `GAME_ID`, or set
-it explicitly, for example to keep the identity clients already stored.
-
-To run a different game, keep its settings in a separate preset and select it
-for every target. Presets with different `GAME_ID` values run side by side:
-
-```bash
-make up P=.env.zzz
+make up P=.env.multi
 make up P=.env.other
 make logs P=.env.other
-make down P=.env.zzz
+make down P=.env.multi
 ```
 
-Create the preset with `cp .env.zzz.example .env.demo` and set `GAME_ID`,
-`GAME_DIR`, `GAME_EXE`, and `GAME_APP_NAME` as described above.
-
-Each game gets its own container `vulcan-<GAME_ID>`, compose project, and
-volume `vulcan_<GAME_ID>-data`. Volumes of games that are no longer configured
-remain on the host; remove them with `docker volume rm`.
-
-`make volumes` lists every Vulcan volume; add `P=".env.zzz:.env.other"` to
-list only those presets.
+Every target prints the selection, for example `[vulcan] P=.env.multi`. A
+target that acts on one container stops when the preset file is missing or
+does not set `SESSION_ID`; `help` and the global targets keep working without
+one.
 
 Start, stop, or inspect several presets in one call. The list is
 colon-separated and every entry must exist before the first container starts:
 
 ```bash
-make up P=".env.zzz:.env.other"
-make stats P=".env.zzz:.env.other"
-make build P=".env.zzz:.env.other"
-make down P=".env.zzz:.env.other"
+make up P=".env.multi:.env.other"
+make stats P=".env.multi:.env.other"
+make build P=".env.multi:.env.other"
+make down P=".env.multi:.env.other"
 ```
 
 Targets that can act on several presets are `build`, `rebuild`, `up`, `stop`,
@@ -191,6 +209,30 @@ Targets that can act on several presets are `build`, `rebuild`, `up`, `stop`,
 The old `*-all` names still work as aliases. Targets that act on one container
 at a time, such as `logs`, `shell`, `btop`, `nvtop`, `watch`, `volume`,
 `config`, and `clean-*`, stop when `P` lists more than one preset.
+
+`make volumes` lists every Vulcan volume; add `P=".env.multi:.env.other"` to
+list only those presets. Volumes of sessions that are no longer configured
+remain on the host; remove them with `docker volume rm`.
+
+### Migrating from per-game presets
+
+Per-game presets are not read by this version. Create `.env.multi` and
+`games.yaml` instead. Old volumes remain on the host; the new session uses
+`vulcan_<SESSION_ID>-data`.
+
+To keep an old Wine prefix, copy it into the new volume before the first
+launch:
+
+```bash
+docker run --rm -v vulcan_<old_game>-data:/old \
+  -v vulcan_<SESSION_ID>-data:/new \
+  alpine sh -c 'mkdir -p /new/prefix/<id> && cp -a /old/prefix/. /new/prefix/<id>/'
+```
+
+The overlay can be rebuilt from the host game directory; copy it only if the
+container had local writes that must survive.
+
+### Ports
 
 Every preset that runs at the same time needs a non-overlapping
 `APOLLO_PORT`, because Apollo binds on the host network and derives all of its
@@ -202,9 +244,9 @@ ports from that value:
 | UDP | `base + 9` through `base + 13` |
 
 Pick bases whose ranges do not intersect on the same protocol. The tracked
-example uses `47989`; a second preset on `48006` does not overlap it. Run
-`make check-ports P=".env.zzz:.env.other"` before starting a set; `up` and
-`restart` run the same check. `make ports P=".env.zzz:.env.other"` prints the
+example uses `48006`; a second session on `47989` does not overlap it. Run
+`make check-ports P=".env.multi:.env.other"` before starting a set; `up` and
+`restart` run the same check. `make ports P=".env.multi:.env.other"` prints the
 derived table for those presets. Clients that only use the default port cannot
 reach a preset with a custom base port.
 
@@ -216,9 +258,9 @@ one preset and leaves the image while another preset still uses it;
 
 ## Fresh deployment
 
-These steps start from a checkout with no image, volume, or `.env.local`.
-The `make` targets pass `compose.nvidia.yaml`; on AMD/Intel hosts use the raw
-`docker compose --env-file .env.local` form without that file.
+These steps start from a checkout with no image, volume, or local preset.
+The `make` targets pass `compose.nvidia.yaml`; on AMD/Intel hosts open a shell
+that does not use that file and pass the generated override explicitly.
 
 1. Read the render node group:
 
@@ -243,17 +285,19 @@ The `make` targets pass `compose.nvidia.yaml`; on AMD/Intel hosts use the raw
    `Couldn't initialize EGL display`, select no encoder, and disconnect the
    client right after the app starts.
 
-3. Create the local configuration:
+3. Create the local configuration and catalog:
 
    ```bash
-   cp .env.zzz.example .env.local
-   $EDITOR .env.local
+   cp .env.multi.example .env.local
+   cp games.example.yaml games.yaml
+   $EDITOR .env.local games.yaml
    make config
    ```
 
-   `GAME_ID`, `GAME_DIR`, `GAME_EXE`, `SPRITZ_DIR`, `RENDER_NODE`, and the
-   GIDs are required. `make config` prints the resolved compose configuration
-   and stops at a missing or malformed value.
+   `SESSION_ID`, `GAMES_CATALOG`, `SPRITZ_DIR`, `RENDER_NODE`, and the GIDs are
+   required. The catalog needs at least one game with a valid `source` and
+   `exe`. `make config` prints the resolved Compose configuration and stops at
+   a missing or malformed value.
 
 4. Build the image for the selected preset:
 
@@ -271,7 +315,7 @@ The `make` targets pass `compose.nvidia.yaml`; on AMD/Intel hosts use the raw
    make logs
    ```
 
-   The first launch of the game creates the Wine prefix in the volume
+   The first launch of a game creates its per-game Wine prefix in the volume
    (about 340 MB). Follow it from the Apollo log:
 
    ```bash
@@ -280,9 +324,9 @@ The `make` targets pass `compose.nvidia.yaml`; on AMD/Intel hosts use the raw
    ```
 
 6. Open `https://<host>:47990` (`APOLLO_PORT + 1`), accept the self-signed
-   certificate, create the web credentials, and pair the first client. The
-   app entry is generated at startup from `config/apollo/apps.json` and runs
-   `launch-game.sh`.
+   certificate, create the web credentials, and pair the first client. Apollo
+   reads one app per catalog game and runs `launch-game.sh <id>` for the
+   selected app.
 
 7. Verify the GPU nodes and the session logs:
 
@@ -292,7 +336,8 @@ The `make` targets pass `compose.nvidia.yaml`; on AMD/Intel hosts use the raw
    docker compose --env-file .env.local exec game tail -f /data/log/sway.log
    ```
 
-To run a different game later, see [Game identity](#game-identity).
+To add or remove games, edit `games.yaml` and restart the session; see
+[Game catalog](#game-catalog).
 
 ### NVIDIA devices
 
@@ -307,7 +352,10 @@ GBM/EGL interop, so the override passes that node (for example
 [AMD and Intel](#amd-and-intel).
 
 ```bash
-docker compose --env-file .env.local -f compose.yaml -f compose.nvidia.yaml up -d
+# make config has already generated .generated/compose.games.yaml
+docker compose --env-file .env.local \
+  -f compose.yaml -f compose.nvidia.yaml \
+  -f .generated/compose.games.yaml up -d
 ```
 
 ```bash
@@ -338,7 +386,8 @@ Defaults:
 
 - Sway: `HEADLESS-1`, `1920x1080@144`.
 - gamescope: `--backend wayland`, fullscreen, 1920x1080@144.
-- Game executable: `GAME_EXE` from the selected env file.
+- Game executable: the catalog `exe` for the selected Apollo app, under
+  `/games/<id>`.
 - Wine: `/data/spritz-wine-tkg/bin/wine64` or `/data/spritz-wine-tkg/bin/wine`,
   with `UMU_USE_STEAM=1`.
 
@@ -404,47 +453,56 @@ through gamescope's EIS socket and gamescope composites the streamed cursor.
 With `GAMESCOPE_ENABLED=0` the game renders directly under Sway, but the
 container then has neither pointer/keyboard input nor a streamed cursor.
 
-## Read-only game directory
+## Read-only game directories
 
-The host directory is mounted at `/games-ro/<GAME_ID>:ro`. An overlay inside
-the container presents a writable view at `/games/<GAME_ID>`:
+Each catalog game is mounted read-only at `/games-ro/<id>`. An overlay inside
+the container presents a writable view at `/games/<id>`:
 
-- lower: `/games-ro/<GAME_ID>`
-- upper/work: `/data/overlay/<GAME_ID>`
+- lower: `/games-ro/<id>`
+- upper/work: `/data/overlay/<id>`
 - host files are never modified
 - game writes, `config.ini`, logs and launcher-generated files stay in the
   container volume
 
-The host directory can also contain state written outside the container,
-including stored logins under `ZenlessZoneZero_Data/Persistent/LocalStorage`
-and `ZenlessZoneZero_Data/SDKCaches/HoYoPass`. Because it is the lower layer, a
-fresh volume would still start signed in. `GAME_RESET_PATHS` lists
-game-relative paths to remove once per prefix; removals land in the overlay
-upper layer and the host files stay untouched. Setting it on an existing
-prefix applies at the next launch.
+Only the directories listed in `games.yaml` are mounted. The generated Compose
+override adds one bind mount per game; there is no shared game root.
 
-Session cleanup targets remove parts of the volume and keep the Wine prefix
-and Apollo state:
+A host game directory can also contain state written outside the container,
+including stored logins under `Data/Login` and cached credentials under
+`Data/Cache`. Because it is the lower layer, a
+fresh volume still starts signed in. The catalog `reset_paths` field lists
+game-relative paths to remove once per Wine prefix; removals land in the
+overlay upper layer and the host files stay untouched. Changing the field on
+an existing prefix applies at the next launch.
+
+The session data volume contains one prefix and one overlay per game:
+
+```text
+/data/prefix/<id>
+/data/overlay/<id>
+```
+
+Session cleanup targets remove parts of the volume and keep Apollo state:
 
 | Target | Removes |
 | --- | --- |
 | `make clean-logs` | `/data/log/*` |
-| `make clean-overlay` | `/data/overlay/<GAME_ID>/{upper,work}/*` and `/data/prefix/.vulcan-reset-paths` |
-| `make clean-appdata` | `/data/prefix/drive_c/users/*/AppData` |
+| `make clean-overlay` | `/data/overlay/*/{upper,work}/*` and `/data/prefix/*/.vulcan-reset-paths` |
+| `make clean-appdata` | `/data/prefix/*/drive_c/users/*/AppData` |
 | `make clean-all` | all of the above |
 
 Each target stops the container, removes its paths, and starts the container
-again. `clean-overlay` also drops the reset marker: the fresh overlay no longer
-holds the whiteouts from the previous `GAME_RESET_PATHS` run, so the next
-launch applies them again. Use it after the host changes files the container
-had already written, since the overlay keeps the container's copy until it is
-removed.
+again. `clean-overlay` also drops the reset markers: the fresh overlays no
+longer hold the whiteouts from the previous reset, so the next launch applies
+the catalog `reset_paths` again. Use it after the host changes files the
+container had already written, since the overlay keeps the container's copy
+until it is removed.
 
 The overlay mount requires `CAP_SYS_ADMIN`, which is granted to the entrypoint.
 The game runs as a non-root user without that capability.
 
-To update the game, stop the container and run the updater/launcher outside
-the streaming container, or start a separate maintenance container with a
+To update a game, stop the container and run the updater/launcher outside the
+streaming container, or start a separate maintenance container with a
 read-write mount. Do not expose a read-write game directory while streaming.
 Run `make clean-overlay` afterwards so the container stops using the copies it
 wrote into its overlay and reads the updated tree.
@@ -490,8 +548,11 @@ Apollo gamepad -> shim -> vulcan-inputd -> vulcan-gamepad.bin
 ```
 
 The shim fakes the gamepad and `vulcan-inputd` writes the pad state to
-`/data/prefix/drive_c/vulcan-gamepad.bin`, which Wine sees as
-`C:\vulcan-gamepad.bin`. The file lives in the `vulcan_<GAME_ID>-data` volume.
+`/data/vulcan-gamepad.bin`, which Wine sees as `C:\vulcan-gamepad.bin`
+through a per-prefix symlink. The file lives in the
+`vulcan_<SESSION_ID>-data` volume and is shared by the catalog games because
+only one game runs at a time.
+
 The input socket is `/run/user/1000/vulcan-input.sock`; `/run` is a tmpfs, so
 the socket exists only while the container runs.
 
@@ -564,7 +625,7 @@ Additional hardening:
 
 ## Limitations
 
-- One active game container at a time.
+- One active game per session at a time; separate sessions can run in parallel.
 - Apollo Linux has no Windows-style virtual display; Sway provides it.
 - HDR is not implemented in this scaffold.
 - mDNS is not configured. Pair manually through the Apollo web UI, or add the

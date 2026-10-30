@@ -30,16 +30,15 @@ sway_xwayland() {
     fi
 }
 
-# render_apollo_apps writes the Apollo app list for one game.
+# render_apollo_apps_multi writes the Apollo app list for every catalog game.
 #
-# Arguments: template path, output path, app name, app command, app uuid.
-# The template must hold at least one app; its remaining fields are kept.
-render_apollo_apps() {
-    local template="$1" output="$2" name="$3" cmd="$4" uuid="$5"
-    # Write in place so an existing file keeps its owner and mode.
-    jq --arg name "$name" --arg cmd "$cmd" --arg uuid "$uuid" \
-        '.apps[0].name = $name
-         | .apps[0].cmd = $cmd
-         | .apps[0].uuid = $uuid' \
+# Arguments: template path, output path, JSON array of {name, cmd, uuid}.
+# The first template app supplies the common fields; each spec overrides the
+# app-specific fields.
+render_apollo_apps_multi() {
+    local template="$1" output="$2" specs="$3"
+    jq --argjson specs "$specs" '
+        .apps[0] as $base
+        | .apps = ($specs | map($base + .))' \
         "$template" >"$output"
 }

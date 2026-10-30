@@ -29,10 +29,20 @@ check_missing() {
 
 cp "$repo_root/Makefile" "$workdir/Makefile"
 cp -r "$repo_root/docker" "$workdir/docker"
-printf 'GAME_ID=zzz\n' >"$workdir/.env.local"
-printf 'GAME_ID=demo\n' >"$workdir/preset.env"
-printf 'GAME_ID=demo\nGPU_VENDOR=nvidia\n' >"$workdir/nvidia.env"
-printf 'GAME_ID=demo\nGPU_VENDOR=amd\n' >"$workdir/amd.env"
+cp -r "$repo_root/scripts" "$workdir/scripts"
+mkdir -p "$workdir/src"
+: >"$workdir/src/Game.exe"
+cat >"$workdir/games.yaml" <<EOF
+games:
+  - id: alpha
+    name: Test Game
+    source: $workdir/src
+    exe: Game.exe
+EOF
+printf 'SESSION_ID=alpha\nGAMES_CATALOG=games.yaml\n' >"$workdir/.env.local"
+printf 'SESSION_ID=demo\nGAMES_CATALOG=games.yaml\n' >"$workdir/preset.env"
+printf 'SESSION_ID=demo\nGAMES_CATALOG=games.yaml\nGPU_VENDOR=nvidia\n' >"$workdir/nvidia.env"
+printf 'SESSION_ID=demo\nGAMES_CATALOG=games.yaml\nGPU_VENDOR=amd\n' >"$workdir/amd.env"
 
 run_make() {
     (cd "$workdir" && make --no-print-directory -n "$@")
@@ -47,7 +57,7 @@ run_help() {
 out="$(run_make up)"
 check_contains 'default env file' '--env-file .env.local' "$out"
 check_contains 'default preset is reported' '[vulcan] P=.env.local' "$out"
-check_contains 'default volume' 'vulcan_zzz-data' "$(run_make clean-logs)"
+check_contains 'default volume' 'vulcan_alpha-data' "$(run_make clean-logs)"
 
 # An explicit file replaces the default for every target.
 out="$(run_make up P=preset.env)"
@@ -62,10 +72,15 @@ out="$(run_make up P=absent.env 2>&1 || true)"
 check_contains 'missing preset is rejected' 'preset absent.env does not exist' "$out"
 check_missing 'missing preset starts nothing' 'docker compose' "$out"
 
-# A preset without GAME_ID is rejected as well.
+# A preset without SESSION_ID is rejected as well.
 printf 'GAME_MODE=windowed\n' >"$workdir/nogame.env"
 out="$(run_make up P=nogame.env 2>&1 || true)"
-check_contains 'preset without GAME_ID is rejected' 'does not define GAME_ID' "$out"
+check_contains 'preset without SESSION_ID is rejected' 'does not define SESSION_ID' "$out"
+
+# A preset must name an existing catalog.
+printf 'SESSION_ID=demo\nGAMES_CATALOG=missing.yaml\n' >"$workdir/nocatalog.env"
+out="$(cd "$workdir" && make --no-print-directory _check-presets P=nocatalog.env 2>&1 || true)"
+check_contains 'missing catalog is rejected' 'missing game catalog: missing.yaml' "$out"
 
 # The old variable names map onto P.
 out="$(run_make up PRESET=preset.env 2>&1)"
@@ -120,7 +135,7 @@ check_contains 'uninstall-all drops the second volume' '--env-file preset.env' "
 check_contains 'uninstall-all removes the image' 'docker rmi vulcan/game-stream:' "$out"
 
 out="$(run_make stats-all P=".env.local:preset.env")"
-check_contains 'stats-all inspects the first container' 'vulcan-zzz' "$out"
+check_contains 'stats-all inspects the first container' 'vulcan-alpha' "$out"
 check_contains 'stats-all inspects the second container' 'vulcan-demo' "$out"
 
 # The list is colon-separated and every entry must exist.
@@ -159,9 +174,9 @@ check_missing 'clean-logs keeps the overlay' '/data/overlay' "$out"
 check_missing 'clean-logs keeps AppData' 'AppData' "$out"
 
 out="$(run_make clean-overlay)"
-check_contains 'clean-overlay removes overlay upper' '/data/overlay/zzz/upper' "$out"
-check_contains 'clean-overlay removes overlay work' '/data/overlay/zzz/work' "$out"
-check_contains 'clean-overlay removes the reset marker' '.vulcan-reset-paths' "$out"
+check_contains 'clean-overlay removes overlay upper' '/data/overlay/*/upper' "$out"
+check_contains 'clean-overlay removes overlay work' '/data/overlay/*/work' "$out"
+check_contains 'clean-overlay removes the reset marker' '/data/prefix/*/.vulcan-reset-paths' "$out"
 check_missing 'clean-overlay keeps the logs' '/data/log' "$out"
 check_missing 'clean-overlay keeps AppData' 'AppData' "$out"
 
@@ -172,8 +187,8 @@ check_missing 'clean-appdata keeps the logs' '/data/log' "$out"
 
 out="$(run_make clean-all)"
 check_contains 'clean-all removes logs' '/data/log/*' "$out"
-check_contains 'clean-all removes the overlay' '/data/overlay/zzz/upper' "$out"
-check_contains 'clean-all removes the reset marker' '.vulcan-reset-paths' "$out"
+check_contains 'clean-all removes the overlay' '/data/overlay/*/upper' "$out"
+check_contains 'clean-all removes the reset marker' '/data/prefix/*/.vulcan-reset-paths' "$out"
 check_contains 'clean-all removes AppData' 'drive_c/users/*/AppData' "$out"
 
 # The bare clean target is gone.
@@ -229,11 +244,11 @@ fi
 
 # Volume targets.
 vol_out="$(cd "$workdir" && make --no-print-directory volume 2>/dev/null || true)"
-check_contains 'volume names the preset volume' 'vulcan_zzz-data' "$vol_out"
+check_contains 'volume names the preset volume' 'vulcan_alpha-data' "$vol_out"
 
 vols_out="$(cd "$workdir" && make --no-print-directory volumes \
     P=".env.local:preset.env" 2>/dev/null || true)"
-check_contains 'volumes lists the first preset' 'vulcan_zzz-data' "$vols_out"
+check_contains 'volumes lists the first preset' 'vulcan_alpha-data' "$vols_out"
 check_contains 'volumes lists the second preset' 'vulcan_demo-data' "$vols_out"
 
 # Image management targets.
@@ -397,12 +412,28 @@ else
     failures=$((failures + 1))
 fi
 
+# The Makefile generates the runtime catalog and mount override.
+cat >"$workdir/yq" <<'YQ'
+#!/bin/sh
+for last; do :; done
+python3 - "$last" <<'PY'
+import json,sys,yaml
+print(json.dumps(yaml.safe_load(open(sys.argv[1])), separators=(",", ":")))
+PY
+YQ
+chmod 0755 "$workdir/yq"
+printf 'SESSION_ID=demo\nGAMES_CATALOG=games.yaml\n' >"$workdir/config.env"
+(cd "$workdir" && make --no-print-directory _games-config P=config.env YQ="$workdir/yq" >/dev/null)
+check_contains 'generated catalog exists' 'Test Game' "$(cat "$workdir/.generated/games.json")"
+check_contains 'generated compose mounts source' "$workdir/src:/games-ro/alpha:ro" "$(cat "$workdir/.generated/compose.games.yaml")"
+
 # A target with a description but no scope tag stops make at parse time.
 guarddir="$workdir/guard"
 mkdir -p "$guarddir"
 cp "$repo_root/Makefile" "$guarddir/Makefile"
 cp -r "$repo_root/docker" "$guarddir/docker"
-printf 'GAME_ID=zzz\n' >"$guarddir/.env.local"
+printf 'SESSION_ID=alpha\nGAMES_CATALOG=games.yaml\n' >"$guarddir/.env.local"
+printf 'games: []\n' >"$guarddir/games.yaml"
 printf 'bogus: ## Missing the scope tag\n' >>"$guarddir/Makefile"
 guard_out="$(cd "$guarddir" && make --no-print-directory help 2>&1 || true)"
 check_contains 'help rejects an untagged target' 'tag: bogus' "$guard_out"

@@ -12,13 +12,16 @@ die() {
 
 # shellcheck source=config-lib.sh
 source /usr/local/bin/config-lib.sh
+# shellcheck source=game-lib.sh
+source /usr/local/bin/game-lib.sh
 
-GAME_ID="${GAME_ID:-}"
-if ! is_valid_game_id "$GAME_ID"; then
-    die "invalid GAME_ID '${GAME_ID}': use letters, digits, dot, dash, or underscore, starting with a letter or digit"
+SESSION_ID="${SESSION_ID:-}"
+if ! is_valid_game_id "$SESSION_ID"; then
+    die "invalid SESSION_ID '${SESSION_ID}': use letters, digits, dot, dash, or underscore, starting with a letter or digit"
 fi
-GAME_PATH="/games/${GAME_ID}"
-GAME_RO_PATH="/games-ro/${GAME_ID}"
+
+GAMES_CATALOG_PATH="${GAMES_CATALOG_PATH:-/config/games/games.json}"
+validate_games_catalog "$GAMES_CATALOG_PATH" || exit 1
 RENDER_NODE="${RENDER_NODE:?set RENDER_NODE in the env file}"
 
 GAME_UID="${GAME_UID:-1000}"
@@ -29,7 +32,6 @@ export XDG_CACHE_HOME="/data/home/.cache"
 export XDG_DATA_HOME="/data/home/.local/share"
 export HOME="/data/home"
 
-install -d -m 0755 "$GAME_PATH"
 if [ ! -e /var/run ] && [ ! -L /var/run ]; then
     ln -s /run /var/run
 fi
@@ -77,7 +79,7 @@ if ! as_game test -w /data; then
     die "/data is not writable by uid ${GAME_UID}; fix the volume ownership"
 fi
 as_game install -d -m 0755 \
-    /data/apollo /data/apollo/credentials /data/home /data/log /data/prefix /data/overlay
+    /data/apollo /data/apollo/credentials /data/home /data/log /data/prefix /data/overlay /data/run
 
 # A tmpfs mount gives the runtime directory the game user's ownership without
 # a chown; sockets only need to live as long as the container.
@@ -86,16 +88,22 @@ mount -t tmpfs -o "uid=${GAME_UID},gid=${GAME_GID},mode=0700,size=128m" tmpfs "$
     || die "failed to mount ${XDG_RUNTIME_DIR}"
 
 if [ "${ENABLE_OVERLAY:-1}" = "1" ]; then
-    if [ ! -d "$GAME_RO_PATH" ]; then
-        die "missing ${GAME_RO_PATH}; mount the host game directory there"
-    fi
-    overlay_dir="/data/overlay/${GAME_ID}"
-    as_game install -d -m 0755 "$overlay_dir" "$overlay_dir/upper" "$overlay_dir/work"
-    if ! mountpoint -q "$GAME_PATH"; then
-        mount -t overlay overlay \
-            -o "lowerdir=${GAME_RO_PATH},upperdir=${overlay_dir}/upper,workdir=${overlay_dir}/work" \
-            "$GAME_PATH" || die "failed to mount overlay for ${GAME_PATH}"
-    fi
+    while IFS= read -r game_id; do
+        game_ro="/games-ro/${game_id}"
+        game_path="/games/${game_id}"
+        overlay_dir="/data/overlay/${game_id}"
+        if [ ! -d "$game_ro" ]; then
+            die "missing ${game_ro}; check the game source in the catalog"
+        fi
+        install -d -m 0755 "$game_path"
+        as_game install -d -m 0755 "$overlay_dir" "$overlay_dir/upper" "$overlay_dir/work"
+        as_game install -d -m 0755 "/data/prefix/${game_id}"
+        if ! mountpoint -q "$game_path"; then
+            mount -t overlay overlay \
+                -o "lowerdir=${game_ro},upperdir=${overlay_dir}/upper,workdir=${overlay_dir}/work" \
+                "$game_path" || die "failed to mount overlay for ${game_path}"
+        fi
+    done < <(game_ids "$GAMES_CATALOG_PATH")
 fi
 
 as_game dbus-daemon --session \
@@ -139,7 +147,7 @@ as_game env \
 SWAY_BACKENDS="headless"
 
 APOLLO_ENCODER="${APOLLO_ENCODER:-nvenc}"
-APOLLO_NAME="${APOLLO_NAME:-Vulcan-${GAME_ID}}"
+APOLLO_NAME="${APOLLO_NAME:-Vulcan-${SESSION_ID}}"
 APOLLO_PORT="${APOLLO_PORT:-47989}"
 APOLLO_ADAPTER="${APOLLO_ADAPTER:-}"
 APOLLO_OUTPUT="${APOLLO_OUTPUT:-HEADLESS-1}"
@@ -148,11 +156,9 @@ GAME_HEIGHT="${GAME_HEIGHT:-1080}"
 GAME_FPS="${GAME_FPS:-144}"
 GAME_MODE="${GAME_WIDTH}x${GAME_HEIGHT}@${GAME_FPS}Hz"
 
-# The app entry is generated from the image template. GAME_APP_UUID must stay
-# stable for a given game, or clients lose the app's stored state.
-APOLLO_APP_NAME="${GAME_APP_NAME:-${GAME_ID}}"
-APOLLO_APP_UUID="${GAME_APP_UUID:-$(derive_app_uuid "$GAME_ID")}"
-APOLLO_APP_CMD="/usr/local/bin/launch-game.sh"
+# Apollo reads one app per catalog entry. Each app starts the launcher with its
+# game id; the launcher resolves the overlay, prefix, and reset paths.
+APOLLO_APP_SPECS="$(build_app_specs "$GAMES_CATALOG_PATH")"
 
 install -d -m 0755 /data/sway
 # Apollo rewrites its config and app list from the web UI, so create the files
@@ -161,8 +167,8 @@ as_game sh -c 'rm -f /data/apollo/apps.json /data/apollo/sunshine.conf &&
     install -m 0644 /dev/null /data/apollo/apps.json &&
     install -m 0644 /dev/null /data/apollo/sunshine.conf'
 
-render_apollo_apps /config/apollo/apps.json /data/apollo/apps.json \
-    "$APOLLO_APP_NAME" "$APOLLO_APP_CMD" "$APOLLO_APP_UUID"
+render_apollo_apps_multi /config/apollo/apps.json /data/apollo/apps.json \
+    "$APOLLO_APP_SPECS"
 
 sed \
     -e "s|@ENCODER@|${APOLLO_ENCODER}|g" \

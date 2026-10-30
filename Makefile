@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 # Select one preset or a colon-separated list of presets:
-#   make up P=.env.zzz
-#   make up P=".env.zzz:.env.other"
+#   make up P=.env.multi
+#   make up P=".env.multi:.env.other"
 # PRESET and PRESETS still work for existing scripts.
 space := $(subst ,, )
 P_EXPLICIT :=
@@ -37,6 +37,10 @@ GPU_VENDOR ?= nvidia
 APOLLO_PKG ?= apollo-git
 APOLLO_COMMIT ?= adc5c5a0bd80831ce495434bb16aee2cd4175fb8
 MIRROR_COUNTRY ?=
+GAMES_CATALOG ?= games.yaml
+YQ ?= yq
+GAMES_OUTPUT_DIR := .generated
+GAMES_COMPOSE := $(GAMES_OUTPUT_DIR)/compose.games.yaml
 
 # The shared environment image is built once per host; the game image adds the
 # vendor packages, Apollo, and the session parts on top of it.
@@ -55,9 +59,9 @@ IMAGE_TAG := local-$(shell printf '%s' '$(BASE_TAG)|$(GPU_VENDOR)|$(APOLLO_PKG)|
 IMAGE := vulcan/game-stream:$(IMAGE_TAG)
 export IMAGE_TAG
 
-COMPOSE = docker compose --env-file $(P_SINGLE) -f compose.yaml -f compose.nvidia.yaml
-CONTAINER := vulcan-$(GAME_ID)
-VOLUME := vulcan_$(GAME_ID)-data
+COMPOSE = docker compose --env-file $(P_SINGLE) -f compose.yaml -f compose.nvidia.yaml -f $(GAMES_COMPOSE)
+CONTAINER := vulcan-$(SESSION_ID)
+VOLUME := vulcan_$(SESSION_ID)-data
 
 # The help tag on a target is the single source of truth for its preset scope:
 #   [global]  needs no preset
@@ -92,7 +96,7 @@ endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help base base-rebuild rm-base images volume volumes _volume-name build up rebuild _recreate stop down restart logs ps up-all down-all stop-all restart-all ps-all build-all stats-all uninstall-all check-ports ports _check-presets _check-ports config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
+.PHONY: help base base-rebuild rm-base images volume volumes _volume-name build up rebuild _recreate stop down restart logs ps up-all down-all stop-all restart-all ps-all build-all stats-all uninstall-all check-ports ports _check-presets _check-ports _games-config config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
 
 # The table keeps the file order of the targets inside each section. A `# ---`
 # line between blocks starts a new group, which the table separates with a blank
@@ -118,7 +122,7 @@ help: ## [global] Show available targets
 			first = 0 ; \
 			printf "%s:\n%s", title[scope], rows[scope] } }' $(MAKEFILE_LIST)
 	@printf '\nP defaults to .env.local.\n'
-	@printf 'P takes colon-separated paths without spaces: P=".env.zzz:.env.other".\n'
+	@printf 'P takes colon-separated paths without spaces: P=".env.multi:.env.other".\n'
 	@printf 'Destructive targets (base-rebuild, uninstall) require CONFIRM=1.\n'
 
 # ---
@@ -163,7 +167,7 @@ volumes: ## [global] List the Vulcan volumes
 	done
 
 # ---
-build: _check-presets base ## [presets] Build the container image
+build: _check-presets _games-config base ## [presets] Build the container image
 ifeq ($(P_COUNT),1)
 	$(COMPOSE) build
 else
@@ -175,7 +179,7 @@ endif
 
 rebuild: build _recreate ## [presets] Rebuild the image and recreate the container
 
-_recreate: _check-presets
+_recreate: _check-presets _games-config
 ifeq ($(P_COUNT),1)
 	$(COMPOSE) up -d --force-recreate
 else
@@ -185,7 +189,7 @@ else
 	done
 endif
 
-up: _check-presets _check-ports ## [presets] Start the container in the background
+up: _check-presets _check-ports _games-config ## [presets] Start the container in the background
 ifeq ($(P_COUNT),1)
 	$(COMPOSE) up -d
 else
@@ -195,7 +199,7 @@ else
 	done
 endif
 
-restart: _check-presets _check-ports ## [presets] Restart the container
+restart: _check-presets _check-ports _games-config ## [presets] Restart the container
 ifeq ($(P_COUNT),1)
 	$(COMPOSE) restart
 else
@@ -205,7 +209,7 @@ else
 	done
 endif
 
-stop: _check-presets ## [presets] Stop the running container
+stop: _check-presets _games-config ## [presets] Stop the running container
 ifeq ($(P_COUNT),1)
 	$(COMPOSE) stop
 else
@@ -215,7 +219,7 @@ else
 	done
 endif
 
-down: _check-presets ## [presets] Stop and remove the container; keep named volumes
+down: _check-presets _games-config ## [presets] Stop and remove the container; keep named volumes
 ifeq ($(P_COUNT),1)
 	$(COMPOSE) down
 else
@@ -226,10 +230,10 @@ else
 endif
 
 # ---
-logs: ## [preset] Follow container logs
+logs: _check-presets _games-config ## [preset] Follow container logs
 	$(COMPOSE) logs -f --tail=200 game
 
-ps: _check-presets ## [presets] Show container status
+ps: _check-presets _games-config ## [presets] Show container status
 ifeq ($(P_COUNT),1)
 	$(COMPOSE) ps
 else
@@ -288,13 +292,13 @@ shell: ## [preset] Open a shell with the running session environment
 		-e WAYLAND_DISPLAY="$${WAYLAND_SOCKET##*/}" \
 		$(CONTAINER) bash
 
-config: ## [preset] Validate and print the resolved compose config
+config: _check-presets _games-config ## [preset] Validate and print the resolved compose config
 	$(COMPOSE) config
 
 # ---
 CLEAN_LOGS := /data/log/*
-CLEAN_OVERLAY := /data/overlay/$(GAME_ID)/upper/* /data/overlay/$(GAME_ID)/work/* /data/prefix/.vulcan-reset-paths
-CLEAN_APPDATA := /data/prefix/drive_c/users/*/AppData
+CLEAN_OVERLAY := /data/overlay/*/upper/* /data/overlay/*/work/* /data/prefix/*/.vulcan-reset-paths
+CLEAN_APPDATA := /data/prefix/*/drive_c/users/*/AppData
 
 clean-logs: ## [preset] Remove the session logs
 clean-logs: CLEAN_PATHS := $(CLEAN_LOGS)
@@ -312,14 +316,14 @@ clean-all: ## [preset] Remove logs, overlay, reset marker, and prefix AppData
 clean-all: CLEAN_PATHS := $(CLEAN_LOGS) $(CLEAN_OVERLAY) $(CLEAN_APPDATA)
 clean-all: _clean-session
 
-_clean-session:
+_clean-session: _check-presets _games-config
 	@set -f; printf '[vulcan] removing:\n'; printf '  %s\n' $(CLEAN_PATHS)
 	$(COMPOSE) down
 	docker run --rm -v $(VOLUME):/data --entrypoint sh $(IMAGE) -c 'set -e; rm -rf $(CLEAN_PATHS)'
 	$(COMPOSE) up -d
 
 # ---
-uninstall: _check-presets ## [presets] Remove the container, its data, and the image
+uninstall: _check-presets _games-config ## [presets] Remove the container, its data, and the image
 	@test "$(CONFIRM)" = "1" || { printf '%s\n' 'Refusing uninstall: run make uninstall CONFIRM=1'; exit 1; }
 ifeq ($(P_COUNT),1)
 	$(COMPOSE) down -v
@@ -356,6 +360,16 @@ _check-presets:
 	@for preset in $(P_LIST); do \
 		test -f "$$preset" || { printf 'missing preset: %s\n' "$$preset" >&2; exit 1; }; \
 	done
+	@if [ "$(P_COUNT)" -eq 1 ]; then \
+		test -f "$(GAMES_CATALOG)" || { printf 'missing game catalog: %s\n' "$(GAMES_CATALOG)" >&2; exit 1; }; \
+	fi
+
+_games-config:
+ifeq ($(P_COUNT),1)
+	@YQ="$(YQ)" scripts/generate-games-config.sh "$(GAMES_CATALOG)" "$(GAMES_OUTPUT_DIR)"
+else
+	@:
+endif
 
 _check-ports: _check-presets
 	@scripts/check-ports.sh $(P_LIST)
@@ -378,8 +392,8 @@ ifneq ($(P_MISSING),)
 $(error preset $(P_MISSING) does not exist: set P=<path>)
 endif
 ifeq ($(P_COUNT),1)
-ifeq ($(strip $(GAME_ID)),)
-$(error preset $(P_SINGLE) does not define GAME_ID)
+ifeq ($(strip $(SESSION_ID)),)
+$(error preset $(P_SINGLE) does not define SESSION_ID)
 endif
 endif
 endif

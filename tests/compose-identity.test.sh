@@ -1,6 +1,6 @@
 #!/bin/bash
-# Verifies that two presets with different GAME_ID values render as separate
-# compose projects, containers, and volumes.
+# Verifies that two session presets render as separate compose projects,
+# containers, and volumes.
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -34,14 +34,19 @@ if ! docker compose version >/dev/null 2>&1; then
     exit 0
 fi
 
+repo="$workdir/repo"
+mkdir -p "$repo/.generated" "$workdir/source"
+cp "$repo_root/compose.yaml" "$repo_root/compose.nvidia.yaml" "$repo/"
+printf '{"games":[]}\n' >"$repo/.generated/games.json"
+printf 'services:\n  game:\n    volumes: []\n' >"$repo/.generated/compose.games.yaml"
+
 write_preset() {
-    local path="$1" game_id="$2" apollo_port="$3"
+    local path="$1" session_id="$2" apollo_port="$3"
     cat >"$path" <<EOF
-GAME_ID=${game_id}
-GAME_DIR=/games/${game_id}
-GAME_EXE=/games/${game_id}/game.exe
+SESSION_ID=${session_id}
+GAMES_CATALOG=$workdir/games.yaml
 RENDER_NODE=/dev/dri/renderD128
-SPRITZ_DIR=/wine
+SPRITZ_DIR=$workdir/source
 APOLLO_PORT=${apollo_port}
 GID_RENDER=1000
 GID_VIDEO=1000
@@ -50,17 +55,19 @@ EOF
 
 render() {
     BASE_IMAGE=vulcan/base:test docker compose --env-file "$1" \
-        -f "$repo_root/compose.yaml" -f "$repo_root/compose.nvidia.yaml" \
+        -f "$repo/compose.yaml" -f "$repo/compose.nvidia.yaml" \
+        -f "$repo/.generated/compose.games.yaml" \
         config 2>/dev/null
 }
 
 check_project() {
-    local label="$1" game_id="$2" apollo_port="$3" other_game_id="$4" config="$5"
-    check_contains "${label} project name" "name: vulcan-${game_id}" "$config"
-    check_contains "${label} container name" "container_name: vulcan-${game_id}" "$config"
-    check_contains "${label} volume name" "name: vulcan_${game_id}-data" "$config"
+    local label="$1" session_id="$2" apollo_port="$3" other_session_id="$4" config="$5"
+    check_contains "${label} project name" "name: vulcan-${session_id}" "$config"
+    check_contains "${label} container name" "container_name: vulcan-${session_id}" "$config"
+    check_contains "${label} volume name" "name: vulcan_${session_id}-data" "$config"
     check_contains "${label} apollo port" "APOLLO_PORT: \"${apollo_port}\"" "$config"
-    check_missing "${label} leaves the other game alone" "vulcan-${other_game_id}" "$config"
+    check_contains "${label} catalog mount" "target: /config/games" "$config"
+    check_missing "${label} leaves the other session alone" "vulcan-${other_session_id}" "$config"
     check_missing "${label} passes no input devices" "c 13:" "$config"
     check_missing "${label} does not add mknod" "- MKNOD" "$config"
     check_missing "${label} does not add net_admin" "- NET_ADMIN" "$config"

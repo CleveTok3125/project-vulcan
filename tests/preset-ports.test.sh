@@ -45,7 +45,7 @@ write_preset other.env 'APOLLO_PORT=48006'
 write_preset third.env 'APOLLO_PORT=47999'
 write_preset close.env 'APOLLO_PORT=47991'
 write_preset adjacent.env 'APOLLO_PORT=47990'
-write_preset default.env 'GAME_ID=demo'
+write_preset default.env 'SESSION_ID=demo'
 write_preset invalid.env 'APOLLO_PORT=not-a-port'
 write_preset low.env 'APOLLO_PORT=700'
 

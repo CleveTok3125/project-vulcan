@@ -31,7 +31,7 @@ entrypoint="$repo_root/scripts/entrypoint.sh"
 session_start="$repo_root/scripts/session-start.sh"
 compose="$repo_root/compose.yaml"
 inputd="$repo_root/rust/inputd/src/main.rs"
-preset="$repo_root/.env.zzz.example"
+preset="$repo_root/.env.multi.example"
 
 check_contains "sway uses only the headless backend" 'SWAY_BACKENDS="headless"' "$entrypoint"
 check_missing "entrypoint starts no input broker" "vulcan-input-broker" "$entrypoint"

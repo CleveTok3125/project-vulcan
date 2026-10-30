@@ -48,7 +48,7 @@ unset DISPLAY
 if [ "$INPUT_TRANSPORT" = "socket" ]; then
     export VULCAN_INPUT_SOCKET="${VULCAN_INPUT_SOCKET:-${XDG_RUNTIME_DIR}/vulcan-input.sock}"
     if [ "${INPUT_GAMEPAD:-1}" = "1" ]; then
-        export VULCAN_GAMEPAD_STATE="${VULCAN_GAMEPAD_STATE:-/data/prefix/drive_c/vulcan-gamepad.bin}"
+        export VULCAN_GAMEPAD_STATE="${VULCAN_GAMEPAD_STATE:-/data/vulcan-gamepad.bin}"
     fi
     unset LD_PRELOAD
     /usr/local/bin/vulcan-inputd >>/data/log/vulcan-inputd.log 2>&1 &
