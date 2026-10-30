@@ -42,7 +42,7 @@ expect_collision() {
 
 write_preset safe.env 'APOLLO_PORT=47989'
 write_preset other.env 'APOLLO_PORT=48006'
-write_preset broforce.env 'APOLLO_PORT=47999'
+write_preset third.env 'APOLLO_PORT=47999'
 write_preset close.env 'APOLLO_PORT=47991'
 write_preset adjacent.env 'APOLLO_PORT=47990'
 write_preset default.env 'GAME_ID=demo'
@@ -50,13 +50,13 @@ write_preset invalid.env 'APOLLO_PORT=not-a-port'
 write_preset low.env 'APOLLO_PORT=700'
 
 expect_ok "separate ranges" \
-    "$workdir/safe.env" "$workdir/other.env" "$workdir/broforce.env"
+    "$workdir/safe.env" "$workdir/other.env" "$workdir/third.env"
 expect_collision "overlapping udp ranges" "udp/48000" \
     "$workdir/safe.env" "$workdir/close.env"
 expect_collision "overlapping udp ranges report every port" "udp/48002" \
     "$workdir/safe.env" "$workdir/close.env"
 expect_ok "same number on another protocol" \
-    "$workdir/safe.env" "$workdir/broforce.env"
+    "$workdir/safe.env" "$workdir/third.env"
 expect_collision "overlapping tcp range" "tcp/47990" \
     "$workdir/safe.env" "$workdir/adjacent.env"
 expect_collision "missing APOLLO_PORT uses the default" "tcp/47989" \

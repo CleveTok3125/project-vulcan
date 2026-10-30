@@ -24,7 +24,7 @@ read_port() {
 }
 
 if [ "$#" -eq 0 ]; then
-    printf 'usage: %s PRESET...\n' "$(basename "$0")" >&2
+    printf 'usage: %s PRESET_FILE...\n' "$(basename "$0")" >&2
     exit 2
 fi
 

@@ -120,22 +120,21 @@ The local file is ignored by git. Use it explicitly:
 docker compose --env-file .env.local -f compose.yaml -f compose.nvidia.yaml up -d
 ```
 
-Keep one file per game or host profile and select it with `PRESET`:
+Keep one file per game or host profile and select it with `P`:
 
 ```bash
 cp .env.zzz.example .env.zzz
 $EDITOR .env.zzz
-make up PRESET=.env.zzz
+make up P=.env.zzz
 ```
 
-`PRESET` selects one preset for every target that acts on a single container,
-including `build`, `logs`, `clean-*`, and `uninstall`. The value is a path
-relative to the repository root; `.env.local` is the default. Each `GAME_ID`
-gets its own container, compose project, and volume, so presets with different
-`GAME_ID` values run side by side. Each target prints the selected file, for
-example `[vulcan] PRESET=.env.zzz`. A target that acts on one container stops
-when the preset file is missing or does not set `GAME_ID`; `help` and the
-`*-all` targets keep working without one.
+`P` takes one preset or a colon-separated list. The value is a path relative
+to the repository root; `.env.local` is the default. Each `GAME_ID` gets its
+own container, compose project, and volume, so presets with different
+`GAME_ID` values run side by side. Every target prints the selection, for
+example `[vulcan] P=.env.zzz`. A target that acts on one container stops when
+the preset file is missing or does not set `GAME_ID`; `help` and the global
+targets keep working without one.
 
 `GAME_ID`, `GAME_DIR`, `GAME_EXE`, `RENDER_NODE`, and `SPRITZ_DIR` are
 required. `GAME_DIR` is mounted at `/games-ro/<GAME_ID>`; `GAME_EXE` is the
@@ -156,10 +155,10 @@ To run a different game, keep its settings in a separate preset and select it
 for every target. Presets with different `GAME_ID` values run side by side:
 
 ```bash
-make up PRESET=.env.zzz
-make up PRESET=.env.other
-make logs PRESET=.env.other
-make down PRESET=.env.zzz
+make up P=.env.zzz
+make up P=.env.other
+make logs P=.env.other
+make down P=.env.zzz
 ```
 
 Create the preset with `cp .env.zzz.example .env.demo` and set `GAME_ID`,
@@ -169,23 +168,24 @@ Each game gets its own container `vulcan-<GAME_ID>`, compose project, and
 volume `vulcan_<GAME_ID>-data`. Volumes of games that are no longer configured
 remain on the host; remove them with `docker volume rm`.
 
-`make volumes` lists every Vulcan volume; add
-`PRESETS=".env.zzz:.env.other"` to list only those presets.
+`make volumes` lists every Vulcan volume; add `P=".env.zzz:.env.other"` to
+list only those presets.
 
-Start or stop several presets in one call. The list is colon-separated, and
-every entry must exist before the first container starts:
+Start, stop, or inspect several presets in one call. The list is
+colon-separated and every entry must exist before the first container starts:
 
 ```bash
-make up-all PRESETS=".env.zzz:.env.other"
-make stats-all PRESETS=".env.zzz:.env.other"
-make build-all PRESETS=".env.zzz:.env.other"
-make down-all PRESETS=".env.zzz:.env.other"
+make up P=".env.zzz:.env.other"
+make stats P=".env.zzz:.env.other"
+make build P=".env.zzz:.env.other"
+make down P=".env.zzz:.env.other"
 ```
 
-The group targets cover `up`, `down`, `stop`, `restart`, `ps`, `build`,
-`stats`, and `uninstall` (which needs `CONFIRM=1`). Targets that act on one
-container at a time, such as `logs`, `shell`, `btop`, `nvtop`, `watch`, and
-`clean-*`, stay per preset.
+Targets that can act on several presets are `build`, `rebuild`, `up`, `stop`,
+`restart`, `down`, `ps`, `stats`, and `uninstall` (which needs `CONFIRM=1`).
+The old `*-all` names still work as aliases. Targets that act on one container
+at a time, such as `logs`, `shell`, `btop`, `nvtop`, `watch`, `volume`,
+`config`, and `clean-*`, stop when `P` lists more than one preset.
 
 Every preset that runs at the same time needs a non-overlapping
 `APOLLO_PORT`, because Apollo binds on the host network and derives all of its
@@ -196,17 +196,17 @@ ports from that value:
 | TCP | `base - 5`, `base`, `base + 1`, `base + 21` |
 | UDP | `base + 9` through `base + 13` |
 
-Pick bases whose ranges do not intersect on the same protocol. The presets in
-this repository use genshin `47989`, zzz `48006`, and broforce `47999`. Run
-`make check-ports PRESETS=".env.genshin:.env.zzz:.env.broforce"` before starting
-a set; `up-all` and `restart-all` run the same check. Clients that only use the
-default port cannot reach a preset with a custom base port.
+Pick bases whose ranges do not intersect on the same protocol. The tracked
+example uses `47989`; a second preset on `48006` does not overlap it. Run
+`make check-ports P=".env.zzz:.env.other"` before starting a set; `up` and
+`restart` run the same check. Clients that only use the default port cannot
+reach a preset with a custom base port.
 
 Both sessions share one GPU, so VRAM, memory bandwidth, and the driver's NVENC
 session limit apply to the sum of the streams. The image and the NVIDIA device
 configuration are shared. `make uninstall` removes the container and volume of
 one preset and leaves the image while another preset still uses it;
-`make uninstall-all` removes the image once the last container is gone.
+`make uninstall P="a:b"` removes the image once the last container is gone.
 
 ## Fresh deployment
 

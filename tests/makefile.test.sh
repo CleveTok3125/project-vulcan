@@ -46,87 +46,110 @@ run_help() {
 # The default configuration file keeps working without arguments.
 out="$(run_make up)"
 check_contains 'default env file' '--env-file .env.local' "$out"
-check_contains 'default preset is reported' '[vulcan] PRESET=.env.local' "$out"
+check_contains 'default preset is reported' '[vulcan] P=.env.local' "$out"
 check_contains 'default volume' 'vulcan_zzz-data' "$(run_make clean-logs)"
 
 # An explicit file replaces the default for every target.
-out="$(run_make up PRESET=preset.env)"
+out="$(run_make up P=preset.env)"
 check_contains 'explicit env file' '--env-file preset.env' "$out"
-check_contains 'explicit preset is reported' '[vulcan] PRESET=preset.env' "$out"
+check_contains 'explicit preset is reported' '[vulcan] P=preset.env' "$out"
 check_missing 'explicit env file replaces default' '--env-file .env.local' "$out"
-check_contains 'explicit preset volume' 'vulcan_demo-data' "$(run_make clean-overlay PRESET=preset.env)"
-check_contains 'explicit preset compose down' '--env-file preset.env' "$(run_make down PRESET=preset.env)"
+check_contains 'explicit preset volume' 'vulcan_demo-data' "$(run_make clean-overlay P=preset.env)"
+check_contains 'explicit preset compose down' '--env-file preset.env' "$(run_make down P=preset.env)"
 
 # A missing preset is rejected before anything runs.
-out="$(run_make up PRESET=absent.env 2>&1 || true)"
+out="$(run_make up P=absent.env 2>&1 || true)"
 check_contains 'missing preset is rejected' 'preset absent.env does not exist' "$out"
 check_missing 'missing preset starts nothing' 'docker compose' "$out"
 
 # A preset without GAME_ID is rejected as well.
 printf 'GAME_MODE=windowed\n' >"$workdir/nogame.env"
-out="$(run_make up PRESET=nogame.env 2>&1 || true)"
+out="$(run_make up P=nogame.env 2>&1 || true)"
 check_contains 'preset without GAME_ID is rejected' 'does not define GAME_ID' "$out"
 
+# The old variable names map onto P.
+out="$(run_make up PRESET=preset.env 2>&1)"
+check_contains 'PRESET is mapped to P' 'PRESET is deprecated' "$out"
+check_contains 'PRESET selects the preset' '--env-file preset.env' "$out"
+
+out="$(run_make up PRESETS=".env.local:preset.env" 2>&1)"
+check_contains 'PRESETS is mapped to P' 'PRESETS is deprecated' "$out"
+check_contains 'PRESETS starts the first preset' '--env-file .env.local' "$out"
+check_contains 'PRESETS starts the second preset' '--env-file preset.env' "$out"
+
+# An alias without a list falls back to the default preset.
+out="$(run_make up-all)"
+check_contains 'up-all defaults to the preset' '--env-file .env.local' "$out"
+
 # Group targets report and start every listed preset.
-out="$(run_make up-all PRESETS=".env.local:preset.env")"
-check_contains 'up-all reports the first preset' '[vulcan] PRESET=.env.local' "$out"
-check_contains 'up-all reports the second preset' '[vulcan] PRESET=preset.env' "$out"
+out="$(run_make up-all P=".env.local:preset.env")"
+check_contains 'up-all reports the first preset' '[vulcan] P=.env.local' "$out"
+check_contains 'up-all reports the second preset' '[vulcan] P=preset.env' "$out"
 check_contains 'up-all starts the first preset' '--env-file .env.local' "$out"
 check_contains 'up-all starts the second preset' '--env-file preset.env' "$out"
 check_contains 'up-all checks the port ranges' 'check-ports.sh' "$out"
 
-out="$(run_make down-all PRESETS=".env.local:preset.env")"
+out="$(run_make down-all P=".env.local:preset.env")"
 check_contains 'down-all stops the second preset' '--env-file preset.env' "$out"
 
-out="$(run_make ps-all PRESETS="preset.env")"
-check_contains 'ps-all reports the preset' '[vulcan] PRESET=preset.env' "$out"
+out="$(run_make ps-all P="preset.env")"
+check_contains 'ps-all reports the preset' '[vulcan] P=preset.env' "$out"
 check_missing 'ps-all leaves out unlisted presets' '--env-file .env.local' "$out"
 
-out="$(run_make stop-all PRESETS=".env.local:preset.env")"
-check_contains 'stop-all reports the first preset' '[vulcan] PRESET=.env.local' "$out"
+out="$(run_make stop-all P=".env.local:preset.env")"
+check_contains 'stop-all reports the first preset' '[vulcan] P=.env.local' "$out"
 check_contains 'stop-all stops the second preset' '--env-file preset.env' "$out"
 
-out="$(run_make restart-all PRESETS="preset.env")"
+out="$(run_make restart-all P="preset.env")"
 check_contains 'restart-all restarts the preset' '--env-file preset.env' "$out"
 
-out="$(run_make build-all PRESETS="preset.env")"
+out="$(run_make build-all P="preset.env")"
 check_contains 'build-all builds the preset' ' build' "$out"
 check_contains 'build-all uses the preset' '--env-file preset.env' "$out"
 
-if (cd "$workdir" && make --no-print-directory uninstall-all PRESETS="preset.env" >/dev/null 2>&1); then
+if (cd "$workdir" && make --no-print-directory uninstall-all P="preset.env" >/dev/null 2>&1); then
     printf 'FAIL uninstall-all requires CONFIRM\n' >&2
     failures=$((failures + 1))
 else
     printf 'ok   uninstall-all requires CONFIRM\n'
 fi
 
-out="$(run_make uninstall-all CONFIRM=1 PRESETS=".env.local:preset.env")"
+out="$(run_make uninstall-all CONFIRM=1 P=".env.local:preset.env")"
 check_contains 'uninstall-all drops the first volume' '--env-file .env.local' "$out"
 check_contains 'uninstall-all drops the second volume' '--env-file preset.env' "$out"
 check_contains 'uninstall-all removes the image' 'docker rmi vulcan/game-stream:' "$out"
 
-out="$(run_make stats-all PRESETS=".env.local:preset.env")"
+out="$(run_make stats-all P=".env.local:preset.env")"
 check_contains 'stats-all inspects the first container' 'vulcan-zzz' "$out"
 check_contains 'stats-all inspects the second container' 'vulcan-demo' "$out"
 
-# The list is required and every entry must exist.
-if (cd "$workdir" && make --no-print-directory up-all >/dev/null 2>&1); then
-    printf 'FAIL up-all requires PRESETS: it ran without a list\n' >&2
-    failures=$((failures + 1))
-else
-    printf 'ok   up-all requires PRESETS\n'
-fi
-if (cd "$workdir" && make --no-print-directory up-all PRESETS=".env.local preset.env" >/dev/null 2>&1); then
+# The list is colon-separated and every entry must exist.
+if (cd "$workdir" && make --no-print-directory up-all P=".env.local preset.env" >/dev/null 2>&1); then
     printf 'FAIL up-all rejects spaces: it accepted a space-separated list\n' >&2
     failures=$((failures + 1))
 else
     printf 'ok   up-all rejects spaces\n'
 fi
-if (cd "$workdir" && make --no-print-directory up-all PRESETS=absent.env >/dev/null 2>&1); then
+if (cd "$workdir" && make --no-print-directory up-all P=absent.env >/dev/null 2>&1); then
     printf 'FAIL up-all rejects a missing preset: it ran with absent.env\n' >&2
     failures=$((failures + 1))
 else
     printf 'ok   up-all rejects a missing preset\n'
+fi
+
+# A single-session target refuses a list.
+out="$(cd "$workdir" && make --no-print-directory -n logs P=".env.local:preset.env" 2>&1 || true)"
+check_contains 'single-session target rejects a list' 'logs needs exactly one preset' "$out"
+check_missing 'rejected list starts nothing' 'docker compose' "$out"
+
+# rebuild builds each preset once, then recreates it.
+out="$(run_make rebuild P=".env.local:preset.env")"
+build_count="$(printf '%s\n' "$out" | grep -c -- '--env-file .* build$')"
+if [ "$build_count" -eq 2 ]; then
+    printf 'ok   rebuild builds each preset once\n'
+else
+    printf 'FAIL rebuild builds each preset once: %s build lines\n' "$build_count" >&2
+    failures=$((failures + 1))
 fi
 
 # Cleanup targets remove only their own paths.
@@ -168,7 +191,7 @@ check_contains 'session shell sets the runtime dir' 'XDG_RUNTIME_DIR=/run/user/1
 check_contains 'session shell sets the wayland display' 'WAYLAND_DISPLAY=' "$out"
 
 # Uninstall removes the container, its volume, and the image.
-out="$(run_make uninstall CONFIRM=1 PRESET=preset.env)"
+out="$(run_make uninstall CONFIRM=1 P=preset.env)"
 check_contains 'uninstall uses the explicit preset' '--env-file preset.env' "$out"
 check_contains 'uninstall removes the image' 'docker rmi vulcan/game-stream:local-' "$out"
 check_contains 'uninstall keeps an image another preset uses' 'still used by another container' "$out"
@@ -199,7 +222,7 @@ vol_out="$(cd "$workdir" && make --no-print-directory volume 2>/dev/null || true
 check_contains 'volume names the preset volume' 'vulcan_zzz-data' "$vol_out"
 
 vols_out="$(cd "$workdir" && make --no-print-directory volumes \
-    PRESETS=".env.local:preset.env" 2>/dev/null || true)"
+    P=".env.local:preset.env" 2>/dev/null || true)"
 check_contains 'volumes lists the first preset' 'vulcan_zzz-data' "$vols_out"
 check_contains 'volumes lists the second preset' 'vulcan_demo-data' "$vols_out"
 
@@ -229,9 +252,9 @@ tag_for() {
     printf '%s\n' "$1" | sed -n 's/.*docker rmi vulcan\/game-stream://p' | head -n 1
 }
 default_tag="$(tag_for "$(run_make uninstall CONFIRM=1)")"
-explicit_tag="$(tag_for "$(run_make uninstall CONFIRM=1 PRESET=nvidia.env)")"
-other_game_tag="$(tag_for "$(run_make uninstall CONFIRM=1 PRESET=preset.env)")"
-variant_tag="$(tag_for "$(run_make uninstall CONFIRM=1 PRESET=amd.env)")"
+explicit_tag="$(tag_for "$(run_make uninstall CONFIRM=1 P=nvidia.env)")"
+other_game_tag="$(tag_for "$(run_make uninstall CONFIRM=1 P=preset.env)")"
+variant_tag="$(tag_for "$(run_make uninstall CONFIRM=1 P=amd.env)")"
 
 if [ -n "$default_tag" ] && [ "$default_tag" = "$explicit_tag" ]; then
     printf 'ok   explicit defaults keep the image tag\n'
@@ -273,12 +296,11 @@ check_contains 'container targets need a preset' 'preset .env.local does not exi
 
 out="$(run_help)"
 check_contains 'help without env file' 'Show available targets' "$out"
-check_contains 'help lists the group targets' 'up-all' "$out"
-check_contains 'help reports the preset' 'PRESET=.env.local' "$out"
-check_contains 'help marks an absent preset list' 'PRESETS=(unset)' "$out"
+check_contains 'help lists the list targets' 'check-ports' "$out"
+check_contains 'help reports the preset' 'P=.env.local' "$out"
 
-out="$(run_help PRESETS=".env.local:preset.env")"
-check_contains 'help reports the preset list' 'PRESETS=.env.local:preset.env' "$out"
+out="$(run_help P=".env.local:preset.env")"
+check_contains 'help reports the preset list' 'P=.env.local:preset.env' "$out"
 
 # help_section prints the rows below one heading, up to the next heading.
 help_section() {
@@ -317,19 +339,19 @@ check_order() {
 
 out="$(run_help)"
 check_contains 'help names the shared section' 'Shared (no preset):' "$out"
-check_contains 'help names the single preset section' 'One preset (PRESET=<path>):' "$out"
-check_contains 'help names the preset list section' 'Several presets (PRESETS=<a>:<b>):' "$out"
+check_contains 'help names the single preset section' 'Exactly one preset (P=<path>):' "$out"
+check_contains 'help names the preset list section' 'One or more presets (P=<a>[:<b>]):' "$out"
 
 shared="$(help_section 'Shared (no preset)')"
-single="$(help_section 'One preset (PRESET=<path>)')"
-listed="$(help_section 'Several presets (PRESETS=<a>:<b>)')"
+single="$(help_section 'Exactly one preset (P=<path>)')"
+listed="$(help_section 'One or more presets (P=<a>[:<b>])')"
 
 check_section 'base needs no preset' 'base' "$shared"
 check_section 'images need no preset' 'images' "$shared"
-check_section 'up needs one preset' 'up' "$single"
+check_section 'logs needs one preset' 'logs' "$single"
 check_section 'clean-all needs one preset' 'clean-all' "$single"
-check_section 'up-all needs the preset list' 'up-all' "$listed"
-check_section 'uninstall-all needs the preset list' 'uninstall-all' "$listed"
+check_section 'up accepts a list' 'up' "$listed"
+check_section 'uninstall accepts a list' 'uninstall' "$listed"
 
 # Each section separates its groups with a blank line.
 if [ "$(count_blank "$shared")" -ge 2 ]; then
@@ -338,24 +360,23 @@ else
     printf 'FAIL shared groups are separated: %s blank lines\n' "$(count_blank "$shared")" >&2
     failures=$((failures + 1))
 fi
-if [ "$(count_blank "$single")" -ge 4 ]; then
+if [ "$(count_blank "$single")" -ge 2 ]; then
     printf 'ok   single preset groups are separated\n'
 else
     printf 'FAIL single preset groups are separated: %s blank lines\n' "$(count_blank "$single")" >&2
     failures=$((failures + 1))
 fi
-if [ "$(count_blank "$listed")" -ge 2 ]; then
+if [ "$(count_blank "$listed")" -ge 1 ]; then
     printf 'ok   preset list groups are separated\n'
 else
     printf 'FAIL preset list groups are separated: %s blank lines\n' "$(count_blank "$listed")" >&2
     failures=$((failures + 1))
 fi
 
-check_order 'single preset starts with build' "$single" 'build' 'up'
-check_order 'single preset ends with uninstall' "$single" 'clean-all' 'uninstall'
-check_order 'cleanup runs before uninstall' "$single" 'clean-logs' 'uninstall'
-check_order 'preset list starts with build-all' "$listed" 'build-all' 'up-all'
-check_order 'preset list ends with uninstall-all' "$listed" 'stats-all' 'uninstall-all'
+check_order 'single preset starts with logs' "$single" 'logs' 'watch'
+check_order 'single preset ends with clean-all' "$single" 'clean-logs' 'clean-all'
+check_order 'preset list starts with build' "$listed" 'build' 'up'
+check_order 'preset list ends with uninstall' "$listed" 'stats' 'uninstall'
 
 duplicates="$(printf '%s\n' "$out" | awk '/^  [a-zA-Z0-9_-]+ / { print $1 }' | sort | uniq -d)"
 if [ -z "$duplicates" ]; then

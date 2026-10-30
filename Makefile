@@ -1,7 +1,36 @@
 SHELL := /bin/bash
-# Select another configuration preset with `make <target> PRESET=<path>`.
-PRESET ?= .env.local
--include $(PRESET)
+# Select one preset or a colon-separated list of presets:
+#   make up P=.env.zzz
+#   make up P=".env.zzz:.env.other"
+# PRESET and PRESETS still work for existing scripts.
+space := $(subst ,, )
+P_EXPLICIT :=
+ifeq ($(origin P),undefined)
+  ifneq ($(strip $(PRESETS)),)
+    $(warning PRESETS is deprecated; use P="a:b")
+    P_EXPLICIT := 1
+    P := $(PRESETS)
+  else ifneq ($(strip $(PRESET)),)
+    $(warning PRESET is deprecated; use P=<path>)
+    P_EXPLICIT := 1
+    P := $(PRESET)
+  endif
+endif
+P ?= .env.local
+P_LIST = $(subst :, ,$(P))
+P_COUNT = $(words $(P_LIST))
+P_SINGLE = $(firstword $(P_LIST))
+VOLUMES_P := $(if $(or $(P_EXPLICIT),$(filter command line environment,$(origin P))),$(P_LIST),)
+# P is only a selector; do not leak it into every recipe environment.
+unexport P
+
+ifneq ($(findstring $(space),$(strip $(P))),)
+$(error P takes colon-separated paths without spaces)
+endif
+
+ifeq ($(P_COUNT),1)
+-include $(P_SINGLE)
+endif
 
 # Build inputs; keep the defaults in sync with the build args in compose.yaml.
 GPU_VENDOR ?= nvidia
@@ -23,14 +52,14 @@ IMAGE_TAG := local-$(shell printf '%s' '$(BASE_TAG)|$(GPU_VENDOR)|$(APOLLO_PKG)|
 IMAGE := vulcan/game-stream:$(IMAGE_TAG)
 export IMAGE_TAG
 
-COMPOSE = docker compose --env-file $(PRESET) -f compose.yaml -f compose.nvidia.yaml
+COMPOSE = docker compose --env-file $(P_SINGLE) -f compose.yaml -f compose.nvidia.yaml
 CONTAINER := vulcan-$(GAME_ID)
 VOLUME := vulcan_$(GAME_ID)-data
 
 # The help tag on a target is the single source of truth for its preset scope:
 #   [global]  needs no preset
-#   [preset]  acts on the preset in PRESET
-#   [presets] acts on the colon-separated list in PRESETS
+#   [preset]  needs exactly one preset
+#   [presets] accepts one or more presets
 #
 # A [presets] target still declares `_check-presets` itself; deriving that
 # prerequisite from the tag would let a mistyped tag turn a group target into a
@@ -40,36 +69,38 @@ VOLUME := vulcan_$(GAME_ID)-data
 # unescaped `#`, even inside a $(shell) argument.
 HELP_MARK := \#\#
 HELP_TARGETS := $(shell grep -hE "^[a-zA-Z0-9_-]+:.*$(HELP_MARK) " $(MAKEFILE_LIST) | cut -d: -f1)
-PRESET_TARGETS := $(shell grep -hoE "^[a-zA-Z0-9_-]+:.*$(HELP_MARK) \[preset\] " $(MAKEFILE_LIST) | cut -d: -f1)
-NO_PRESET_TARGETS := $(shell grep -hoE "^[a-zA-Z0-9_-]+:.*$(HELP_MARK) \[(global|presets)\] " $(MAKEFILE_LIST) | cut -d: -f1)
-UNTAGGED_TARGETS := $(filter-out $(PRESET_TARGETS) $(NO_PRESET_TARGETS),$(HELP_TARGETS))
+SINGLE_TARGETS := $(shell grep -hoE "^[a-zA-Z0-9_-]+:.*$(HELP_MARK) \[preset\] " $(MAKEFILE_LIST) | cut -d: -f1)
+LIST_TARGETS := $(shell grep -hoE "^[a-zA-Z0-9_-]+:.*$(HELP_MARK) \[presets\] " $(MAKEFILE_LIST) | cut -d: -f1)
+GLOBAL_TARGETS := $(shell grep -hoE "^[a-zA-Z0-9_-]+:.*$(HELP_MARK) \[global\] " $(MAKEFILE_LIST) | cut -d: -f1)
+ALIAS_TARGETS := build-all up-all restart-all stop-all down-all ps-all stats-all uninstall-all
+SESSION_TARGETS := $(SINGLE_TARGETS) $(LIST_TARGETS) $(ALIAS_TARGETS)
+UNTAGGED_TARGETS := $(filter-out $(SINGLE_TARGETS) $(LIST_TARGETS) $(GLOBAL_TARGETS),$(HELP_TARGETS))
 ifneq ($(UNTAGGED_TARGETS),)
 $(error help targets need a [global], [preset], or [presets] tag: $(UNTAGGED_TARGETS))
 endif
 
-# Show the selected preset once per invocation; `watch` calls make in a loop
-# and the group targets report each preset from their own loop.
+# Show the selection once per invocation; the group recipe reports each preset
+# from its own loop.
 ifeq ($(MAKELEVEL),0)
-ifeq ($(filter $(NO_PRESET_TARGETS),$(MAKECMDGOALS)),)
-$(info [vulcan] PRESET=$(PRESET))
+ifneq ($(filter $(SESSION_TARGETS),$(MAKECMDGOALS)),)
+$(info [vulcan] P=$(P))
 endif
 endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help base base-rebuild rm-base images volume volumes _volume-name build up rebuild stop down restart logs ps up-all down-all stop-all restart-all ps-all build-all stats-all uninstall-all check-ports _check-presets _check-ports config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
+.PHONY: help base base-rebuild rm-base images volume volumes _volume-name build up rebuild _recreate stop down restart logs ps up-all down-all stop-all restart-all ps-all build-all stats-all uninstall-all check-ports _check-presets _check-ports config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
 
 # The table keeps the file order of the targets inside each section. A `# ---`
 # line between blocks starts a new group, which the table separates with a blank
 # line.
 help: ## [global] Show available targets
-	@printf 'PRESET=%s\n' '$(PRESET)'
-	@printf 'PRESETS=%s\n' '$(if $(strip $(PRESETS)),$(PRESETS),(unset))'
+	@printf 'P=%s\n' '$(P)'
 	@printf '\n'
 	@awk 'BEGIN { FS = ":.*## " ; split("global preset presets", scope_order, " ") ; \
 		title["global"] = "Shared (no preset)" ; \
-		title["preset"] = "One preset (PRESET=<path>)" ; \
-		title["presets"] = "Several presets (PRESETS=<a>:<b>)" } \
+		title["preset"] = "Exactly one preset (P=<path>)" ; \
+		title["presets"] = "One or more presets (P=<a>[:<b>])" } \
 	/^# ---$$/ { pending_break = 1 ; next } \
 	/^[a-zA-Z0-9_-]+:.*## \[[a-z]+\] / { \
 		scope = $$2 ; sub(/^\[/, "", scope) ; sub(/\].*/, "", scope) ; \
@@ -83,9 +114,9 @@ help: ## [global] Show available targets
 			if (!first) printf "\n" ; \
 			first = 0 ; \
 			printf "%s:\n%s", title[scope], rows[scope] } }' $(MAKEFILE_LIST)
-	@printf '\nPRESET defaults to .env.local.\n'
-	@printf 'PRESETS takes colon-separated paths without spaces.\n'
-	@printf 'Destructive targets (base-rebuild, uninstall, uninstall-all) require CONFIRM=1.\n'
+	@printf '\nP defaults to .env.local.\n'
+	@printf 'P takes colon-separated paths without spaces: P=".env.zzz:.env.other".\n'
+	@printf 'Destructive targets (base-rebuild, uninstall) require CONFIRM=1.\n'
 
 # ---
 base: ## [global] Build the shared environment image for this host
@@ -113,9 +144,9 @@ images: ## [global] List the Vulcan images
 
 volumes: ## [global] List the Vulcan volumes
 	@names=""; \
-	if [ -n "$(strip $(PRESETS))" ]; then \
-		for preset in $(PRESET_LIST); do \
-			names="$$names $$($(MAKE) -s --no-print-directory _volume-name PRESET="$$preset")"; \
+	if [ -n "$(VOLUMES_P)" ]; then \
+		for preset in $(VOLUMES_P); do \
+			names="$$names $$($(MAKE) -s --no-print-directory _volume-name P="$$preset")"; \
 		done; \
 	else \
 		names=$$(docker volume ls --format '{{.Name}}' --filter name=vulcan_); \
@@ -129,36 +160,94 @@ volumes: ## [global] List the Vulcan volumes
 	done
 
 # ---
-build: base ## [preset] Build the container image
+build: _check-presets base ## [presets] Build the container image
+ifeq ($(P_COUNT),1)
 	$(COMPOSE) build
+else
+	@for preset in $(P_LIST); do \
+		printf '[vulcan] P=%s\n' "$$preset"; \
+		$(MAKE) --no-print-directory build P="$$preset" || exit 1; \
+	done
+endif
 
-rebuild: build ## [preset] Rebuild the image and recreate the container
+rebuild: build _recreate ## [presets] Rebuild the image and recreate the container
+
+_recreate: _check-presets
+ifeq ($(P_COUNT),1)
 	$(COMPOSE) up -d --force-recreate
+else
+	@for preset in $(P_LIST); do \
+		printf '[vulcan] P=%s\n' "$$preset"; \
+		$(MAKE) --no-print-directory _recreate P="$$preset" || exit 1; \
+	done
+endif
 
-up: ## [preset] Start the container in the background
+up: _check-presets _check-ports ## [presets] Start the container in the background
+ifeq ($(P_COUNT),1)
 	$(COMPOSE) up -d
+else
+	@for preset in $(P_LIST); do \
+		printf '[vulcan] P=%s\n' "$$preset"; \
+		$(MAKE) --no-print-directory up P="$$preset" || exit 1; \
+	done
+endif
 
-restart: ## [preset] Restart the container
+restart: _check-presets _check-ports ## [presets] Restart the container
+ifeq ($(P_COUNT),1)
 	$(COMPOSE) restart
+else
+	@for preset in $(P_LIST); do \
+		printf '[vulcan] P=%s\n' "$$preset"; \
+		$(MAKE) --no-print-directory restart P="$$preset" || exit 1; \
+	done
+endif
 
-stop: ## [preset] Stop the running container
+stop: _check-presets ## [presets] Stop the running container
+ifeq ($(P_COUNT),1)
 	$(COMPOSE) stop
+else
+	@for preset in $(P_LIST); do \
+		printf '[vulcan] P=%s\n' "$$preset"; \
+		$(MAKE) --no-print-directory stop P="$$preset" || exit 1; \
+	done
+endif
 
-down: ## [preset] Stop and remove the container; keep named volumes
+down: _check-presets ## [presets] Stop and remove the container; keep named volumes
+ifeq ($(P_COUNT),1)
 	$(COMPOSE) down
+else
+	@for preset in $(P_LIST); do \
+		printf '[vulcan] P=%s\n' "$$preset"; \
+		$(MAKE) --no-print-directory down P="$$preset" || exit 1; \
+	done
+endif
 
 # ---
 logs: ## [preset] Follow container logs
 	$(COMPOSE) logs -f --tail=200 game
 
-ps: ## [preset] Show container status
+ps: _check-presets ## [presets] Show container status
+ifeq ($(P_COUNT),1)
 	$(COMPOSE) ps
+else
+	@for preset in $(P_LIST); do \
+		printf '[vulcan] P=%s\n' "$$preset"; \
+		$(MAKE) --no-print-directory ps P="$$preset" || exit 1; \
+	done
+endif
 
-stats: ## [preset] Show container CPU, memory, and GPU usage
+stats: _check-presets ## [presets] Show container CPU, memory, and GPU usage
+ifeq ($(P_COUNT),1)
 	@docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}' $(CONTAINER)
 	@docker exec $(CONTAINER) nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits | awk -F', ' '{printf "GPU: %s%%  VRAM: %s/%s MiB  Temp: %s C\n", $$1, $$2, $$3, $$4}'
+else
+	@for preset in $(P_LIST); do \
+		printf '[vulcan] P=%s\n' "$$preset"; \
+		$(MAKE) --no-print-directory stats P="$$preset" || exit 1; \
+	done
+endif
 
-usage: stats ## [preset] Alias for stats
+usage: stats ## [presets] Alias for stats
 
 watch: ## [preset] Refresh container usage every 2 seconds
 	@while true; do printf '\033[2J\033[H'; $(MAKE) --no-print-directory stats; sleep 2; done
@@ -227,8 +316,9 @@ _clean-session:
 	$(COMPOSE) up -d
 
 # ---
-uninstall: ## [preset] Remove the container, its data, and the image
+uninstall: _check-presets ## [presets] Remove the container, its data, and the image
 	@test "$(CONFIRM)" = "1" || { printf '%s\n' 'Refusing uninstall: run make uninstall CONFIRM=1'; exit 1; }
+ifeq ($(P_COUNT),1)
 	$(COMPOSE) down -v
 	@if docker image inspect $(IMAGE) >/dev/null 2>&1; then \
 		docker rmi $(IMAGE) 2>/dev/null || \
@@ -236,85 +326,54 @@ uninstall: ## [preset] Remove the container, its data, and the image
 	else \
 		printf 'image %s is already absent\n' '$(IMAGE)'; \
 	fi
-
-# Group targets take an explicit, colon-separated list:
-#   make up-all PRESETS=".env.zzz:.env.broforce"
-PRESETS ?=
-PRESET_LIST = $(subst :, ,$(PRESETS))
-CHECK_PRESETS = test -n "$(PRESETS)" || { printf '%s\n' 'set PRESETS, for example PRESETS=".env.zzz:.env.broforce"' >&2; exit 1; }; \
-	case "$(PRESETS)" in *[[:space:]]*) printf '%s\n' 'PRESETS takes colon-separated paths without spaces' >&2; exit 1 ;; esac
-
-build-all: _check-presets ## [presets] Build the image for every listed preset
-	@for preset in $(PRESET_LIST); do \
-		printf '[vulcan] PRESET=%s\n' "$$preset"; \
-		$(MAKE) --no-print-directory build PRESET="$$preset" || exit 1; \
+else
+	@for preset in $(P_LIST); do \
+		printf '[vulcan] P=%s\n' "$$preset"; \
+		$(MAKE) --no-print-directory uninstall CONFIRM=1 P="$$preset" || exit 1; \
 	done
+endif
 
-up-all: _check-presets _check-ports ## [presets] Start every listed preset
-	@for preset in $(PRESET_LIST); do \
-		printf '[vulcan] PRESET=%s\n' "$$preset"; \
-		$(MAKE) --no-print-directory up PRESET="$$preset" || exit 1; \
-	done
-
-restart-all: _check-presets _check-ports ## [presets] Restart every listed preset
-	@for preset in $(PRESET_LIST); do \
-		printf '[vulcan] PRESET=%s\n' "$$preset"; \
-		$(MAKE) --no-print-directory restart PRESET="$$preset" || exit 1; \
-	done
-
-stop-all: _check-presets ## [presets] Stop every listed preset
-	@for preset in $(PRESET_LIST); do \
-		printf '[vulcan] PRESET=%s\n' "$$preset"; \
-		$(MAKE) --no-print-directory stop PRESET="$$preset" || exit 1; \
-	done
-
-down-all: _check-presets ## [presets] Stop and remove every listed preset
-	@for preset in $(PRESET_LIST); do \
-		printf '[vulcan] PRESET=%s\n' "$$preset"; \
-		$(MAKE) --no-print-directory down PRESET="$$preset" || exit 1; \
-	done
-
-# ---
-ps-all: _check-presets ## [presets] Show the status of every listed preset
-	@for preset in $(PRESET_LIST); do \
-		printf '[vulcan] PRESET=%s\n' "$$preset"; \
-		$(MAKE) --no-print-directory ps PRESET="$$preset" || exit 1; \
-	done
-
-stats-all: _check-presets ## [presets] Show resource usage for every listed preset
-	@for preset in $(PRESET_LIST); do \
-		printf '[vulcan] PRESET=%s\n' "$$preset"; \
-		$(MAKE) --no-print-directory stats PRESET="$$preset" || exit 1; \
-	done
+# Deprecated aliases: the base targets accept one or more presets.
+build-all: build
+up-all: up
+restart-all: restart
+stop-all: stop
+down-all: down
+ps-all: ps
+stats-all: stats
+uninstall-all: uninstall
 
 check-ports: _check-ports ## [presets] Check that Apollo port ranges do not overlap
 
-# ---
-uninstall-all: _check-presets ## [presets] Remove the container, volume, and image of every listed preset
-	@test "$(CONFIRM)" = "1" || { printf '%s\n' 'Refusing uninstall: run make uninstall-all CONFIRM=1'; exit 1; }
-	@for preset in $(PRESET_LIST); do \
-		printf '[vulcan] PRESET=%s\n' "$$preset"; \
-		$(MAKE) --no-print-directory uninstall CONFIRM=1 PRESET="$$preset" || exit 1; \
-	done
-
 _check-presets:
-	@$(CHECK_PRESETS)
-	@for preset in $(PRESET_LIST); do \
+	@test -n "$(strip $(P))" || { printf '%s\n' 'set P to a preset or a colon-separated list' >&2; exit 1; }
+	@for preset in $(P_LIST); do \
 		test -f "$$preset" || { printf 'missing preset: %s\n' "$$preset" >&2; exit 1; }; \
 	done
 
 _check-ports: _check-presets
-	@scripts/check-ports.sh $(PRESET_LIST)
+	@scripts/check-ports.sh $(P_LIST)
 
-# Targets tagged [preset] need an existing preset with a GAME_ID; the [global]
-# and [presets] targets resolve their own configuration.
+# Targets tagged [preset] need exactly one preset; [presets] targets accept a
+# list and validate each entry themselves.
 KNOWN_TARGETS := $(shell grep -hoE '^[a-zA-Z0-9_-]+:' $(MAKEFILE_LIST) | tr -d ':')
-CONFIG_GOALS := $(filter-out $(NO_PRESET_TARGETS),$(filter $(KNOWN_TARGETS),$(MAKECMDGOALS)))
+CONFIG_GOALS := $(filter $(SESSION_TARGETS),$(filter $(KNOWN_TARGETS),$(MAKECMDGOALS)))
 ifneq ($(CONFIG_GOALS),)
-ifeq ($(wildcard $(PRESET)),)
-$(error preset $(PRESET) does not exist: set PRESET=<path>)
+ifeq ($(P_COUNT),0)
+$(error set P to a preset path or a colon-separated list)
 endif
+ifneq ($(filter $(SINGLE_TARGETS),$(MAKECMDGOALS)),)
+ifneq ($(P_COUNT),1)
+$(error $(filter $(SINGLE_TARGETS),$(MAKECMDGOALS)) needs exactly one preset in P)
+endif
+endif
+P_MISSING := $(strip $(filter-out $(wildcard $(P_LIST)),$(P_LIST)))
+ifneq ($(P_MISSING),)
+$(error preset $(P_MISSING) does not exist: set P=<path>)
+endif
+ifeq ($(P_COUNT),1)
 ifeq ($(strip $(GAME_ID)),)
-$(error preset $(PRESET) does not define GAME_ID)
+$(error preset $(P_SINGLE) does not define GAME_ID)
+endif
 endif
 endif
