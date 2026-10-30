@@ -10,6 +10,7 @@ FROM ${BASE_IMAGE} AS game-base
 ARG GPU_VENDOR=nvidia
 
 RUN if [ "$GPU_VENDOR" = "nvidia" ]; then \
+        /usr/local/bin/fetch-heavy nvidia-utils; \
         pacman -S --noconfirm --needed --disable-download-timeout nvidia-utils; \
     else \
         pacman -S --noconfirm --needed --disable-download-timeout vulkan-radeon libva-mesa-driver; \
@@ -33,7 +34,9 @@ WORKDIR /home/builder
 # "Couldn't scale frame: Invalid argument" and Apollo falls back to libx264.
 # The toolkit stays in this stage; the game image only receives the package.
 RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
-    sudo pacman -Sy --noconfirm --needed cuda \
+    sudo pacman -Sy --noconfirm --needed \
+    && sudo /usr/local/bin/fetch-heavy cuda \
+    && sudo pacman -S --noconfirm --needed --disable-download-timeout cuda \
     && git clone --depth 1 "https://aur.archlinux.org/${APOLLO_PKG}.git" "/home/builder/${APOLLO_PKG}" \
     && cd "/home/builder/${APOLLO_PKG}" \
     && if [ "$APOLLO_PKG" = "apollo-git" ]; then \
@@ -45,7 +48,8 @@ FROM ${BASE_IMAGE} AS native-builder
 
 COPY native /src
 RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
-    pacman -S --noconfirm --needed --disable-download-timeout mingw-w64-gcc \
+    /usr/local/bin/fetch-heavy mingw-w64-gcc \
+    && pacman -S --noconfirm --needed --disable-download-timeout mingw-w64-gcc \
     && mkdir -p /out \
     && x86_64-w64-mingw32-gcc -shared -O2 \
         -o /out/xinput1_4.dll \

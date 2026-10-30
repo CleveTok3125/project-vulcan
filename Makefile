@@ -43,7 +43,7 @@ MIRROR_COUNTRY ?=
 BASE_DOCKERFILE := docker/base.Dockerfile
 # The base tag follows everything copied into the base image, so a change to
 # the downloader or its package list rebuilds the base.
-BASE_INPUTS := $(BASE_DOCKERFILE) docker/pacman-aria2 docker/aria2-heavy-packages
+BASE_INPUTS := $(BASE_DOCKERFILE) docker/fetch-heavy
 BASE_HASH := $(shell cat $(BASE_INPUTS) | sha256sum | cut -c1-12)
 BASE_TAG := local-$(shell printf '%s|%s' "$(MIRROR_COUNTRY)" "$(BASE_HASH)" | sha256sum | cut -c1-12)
 BASE_IMAGE := vulcan/base:$(BASE_TAG)

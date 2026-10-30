@@ -1,0 +1,27 @@
+#!/bin/sh
+# Prefetch the named packages into the pacman cache with aria2.
+#
+# Pacman keeps its default downloader for everything else, including
+# repository databases, parallel downloads, and mirror rotation.
+set -u
+cache=${PACMAN_CACHE:-/var/cache/pacman/pkg}
+
+for name in "$@"; do
+    pacman -Sp --print-format '%n %l' "$name" 2>/dev/null |
+    while read -r package url; do
+        [ "$package" = "$name" ] || continue
+        [ -n "$url" ] || continue
+        file=${url##*/}
+        [ -f "$cache/$file" ] && continue
+        aria2c --console-log-level=error -c -x 16 -s 16 -k 1M \
+            --file-allocation=none --allow-overwrite=true \
+            --auto-file-renaming=false --max-tries=3 --retry-wait=2 \
+            --connect-timeout=10 --timeout=60 \
+            -d "$cache" -o "$file.part" "$url" || continue
+        mv "$cache/$file.part" "$cache/$file" 2>/dev/null || true
+    done
+done
+
+# A prefetch failure must not stop the build; pacman retries with its default
+# downloader.
+exit 0

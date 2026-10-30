@@ -200,20 +200,20 @@ check_contains 'uninstall keeps an image another preset uses' 'still used by ano
 out="$(run_make base)"
 check_contains 'base builds from its own file' 'docker/base.Dockerfile' "$out"
 check_contains 'base has its own tag' 'vulcan/base:local-' "$out"
-expected_tag="local-$(printf '%s|%s' "" "$(cat "$workdir/docker/base.Dockerfile" "$workdir/docker/pacman-aria2" "$workdir/docker/aria2-heavy-packages" | sha256sum | cut -c1-12)" | sha256sum | cut -c1-12)"
+expected_tag="local-$(printf '%s|%s' "" "$(cat "$workdir/docker/base.Dockerfile" "$workdir/docker/fetch-heavy" | sha256sum | cut -c1-12)" | sha256sum | cut -c1-12)"
 check_contains 'base tag follows the base file' "vulcan/base:${expected_tag}" "$out"
 check_missing 'base ignores the game preset' '--env-file' "$out"
 printf '# local change\n' >>"$workdir/docker/base.Dockerfile"
 out_changed="$(run_make base)"
 check_missing 'base tag changes with the base file' "vulcan/base:${expected_tag}" "$out_changed"
 changed_tag="$(printf '%s\n' "$out_changed" | sed -n 's/.*vulcan\/base:\(local-[0-9a-f]*\).*/\1/p' | head -n 1)"
-printf '# local change\n' >>"$workdir/docker/aria2-heavy-packages"
+printf '# local change\n' >>"$workdir/docker/fetch-heavy"
 out_list="$(run_make base)"
 list_tag="$(printf '%s\n' "$out_list" | sed -n 's/.*vulcan\/base:\(local-[0-9a-f]*\).*/\1/p' | head -n 1)"
 if [ -n "$changed_tag" ] && [ "$changed_tag" != "$list_tag" ]; then
-    printf 'ok   base tag changes with the heavy package list\n'
+    printf 'ok   base tag changes with the fetch script\n'
 else
-    printf 'FAIL base tag changes with the heavy package list: [%s] vs [%s]\n' "$changed_tag" "$list_tag" >&2
+    printf 'FAIL base tag changes with the fetch script: [%s] vs [%s]\n' "$changed_tag" "$list_tag" >&2
     failures=$((failures + 1))
 fi
 

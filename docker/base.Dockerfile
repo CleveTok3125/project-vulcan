@@ -101,16 +101,13 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
 RUN update-mime-database /usr/share/mime \
     && test -f /usr/share/mime/magic
 
-# aria2c downloads the packages listed in docker/aria2-heavy-packages over
-# several connections. Database files and small packages use curl; see
-# pacman-aria2 for the failure mode with the small signature files.
-COPY docker/pacman-aria2 /usr/local/bin/pacman-aria2
-COPY docker/aria2-heavy-packages /etc/pacman.d/aria2-heavy-packages
+# aria2 fetches the large packages listed by the build stages into the pacman
+# cache; pacman downloads everything else with its default downloader.
+COPY docker/fetch-heavy /usr/local/bin/fetch-heavy
 
 RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
     pacman -S --noconfirm --needed --disable-download-timeout aria2 \
-    && chmod 0755 /usr/local/bin/pacman-aria2 \
-    && sed -i '/^\[options\]/a XferCommand = /usr/local/bin/pacman-aria2 %u %o' /etc/pacman.conf
+    && chmod 0755 /usr/local/bin/fetch-heavy
 
 # The game user and the groups it joins are identical for every preset.
 RUN groupadd -f seat \

@@ -1,5 +1,0 @@
-# Package filename patterns that download through aria2c.
-# Everything else, including repository databases and signatures, uses curl.
-cuda-*
-nvidia-utils-*
-mingw-w64-gcc-*
