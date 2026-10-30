@@ -187,12 +187,25 @@ The group targets cover `up`, `down`, `stop`, `restart`, `ps`, `build`,
 container at a time, such as `logs`, `shell`, `btop`, `nvtop`, `watch`, and
 `clean-*`, stay per preset.
 
-Set a distinct `APOLLO_PORT` in every preset that runs at the same time,
-because Apollo binds on the host network; the web UI listens on
-`APOLLO_PORT + 1`. Both sessions share one GPU, so VRAM, memory bandwidth, and
-the driver's NVENC session limit apply to the sum of the streams. The image and
-the NVIDIA device configuration are shared: run `make down` for every preset
-before `make uninstall`.
+Every preset that runs at the same time needs a non-overlapping
+`APOLLO_PORT`, because Apollo binds on the host network and derives all of its
+ports from that value:
+
+| Protocol | Ports |
+| --- | --- |
+| TCP | `base - 5`, `base`, `base + 1`, `base + 21` |
+| UDP | `base + 9` through `base + 13` |
+
+Pick bases whose ranges do not intersect on the same protocol. The presets in
+this repository use genshin `47989`, zzz `48006`, and broforce `47999`. Run
+`make check-ports PRESETS=".env.genshin:.env.zzz:.env.broforce"` before starting
+a set; `up-all` and `restart-all` run the same check. Clients that only use the
+default port cannot reach a preset with a custom base port.
+
+Both sessions share one GPU, so VRAM, memory bandwidth, and the driver's NVENC
+session limit apply to the sum of the streams. The image and the NVIDIA device
+configuration are shared: run `make down` for every preset before
+`make uninstall`.
 
 ## Fresh deployment
 

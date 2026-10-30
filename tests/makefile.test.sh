@@ -73,6 +73,7 @@ check_contains 'up-all reports the first preset' '[vulcan] PRESET=.env.local' "$
 check_contains 'up-all reports the second preset' '[vulcan] PRESET=preset.env' "$out"
 check_contains 'up-all starts the first preset' '--env-file .env.local' "$out"
 check_contains 'up-all starts the second preset' '--env-file preset.env' "$out"
+check_contains 'up-all checks the port ranges' 'check-ports.sh' "$out"
 
 out="$(run_make down-all PRESETS=".env.local:preset.env")"
 check_contains 'down-all stops the second preset' '--env-file preset.env' "$out"

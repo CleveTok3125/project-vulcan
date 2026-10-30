@@ -57,7 +57,7 @@ endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help base base-rebuild rm-base images volume volumes _volume-name build up rebuild stop down restart logs ps up-all down-all stop-all restart-all ps-all build-all stats-all uninstall-all _check-presets config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
+.PHONY: help base base-rebuild rm-base images volume volumes _volume-name build up rebuild stop down restart logs ps up-all down-all stop-all restart-all ps-all build-all stats-all uninstall-all check-ports _check-presets _check-ports config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
 
 # The table keeps the file order of the targets inside each section. A `# ---`
 # line between blocks starts a new group, which the table separates with a blank
@@ -249,13 +249,13 @@ build-all: _check-presets ## [presets] Build the image for every listed preset
 		$(MAKE) --no-print-directory build PRESET="$$preset" || exit 1; \
 	done
 
-up-all: _check-presets ## [presets] Start every listed preset
+up-all: _check-presets _check-ports ## [presets] Start every listed preset
 	@for preset in $(PRESET_LIST); do \
 		printf '[vulcan] PRESET=%s\n' "$$preset"; \
 		$(MAKE) --no-print-directory up PRESET="$$preset" || exit 1; \
 	done
 
-restart-all: _check-presets ## [presets] Restart every listed preset
+restart-all: _check-presets _check-ports ## [presets] Restart every listed preset
 	@for preset in $(PRESET_LIST); do \
 		printf '[vulcan] PRESET=%s\n' "$$preset"; \
 		$(MAKE) --no-print-directory restart PRESET="$$preset" || exit 1; \
@@ -286,6 +286,8 @@ stats-all: _check-presets ## [presets] Show resource usage for every listed pres
 		$(MAKE) --no-print-directory stats PRESET="$$preset" || exit 1; \
 	done
 
+check-ports: _check-ports ## [presets] Check that Apollo port ranges do not overlap
+
 # ---
 uninstall-all: _check-presets ## [presets] Remove the container, volume, and image of every listed preset
 	@test "$(CONFIRM)" = "1" || { printf '%s\n' 'Refusing uninstall: run make uninstall-all CONFIRM=1'; exit 1; }
@@ -299,6 +301,9 @@ _check-presets:
 	@for preset in $(PRESET_LIST); do \
 		test -f "$$preset" || { printf 'missing preset: %s\n' "$$preset" >&2; exit 1; }; \
 	done
+
+_check-ports: _check-presets
+	@scripts/check-ports.sh $(PRESET_LIST)
 
 # Targets tagged [preset] need an existing preset with a GAME_ID; the [global]
 # and [presets] targets resolve their own configuration.
