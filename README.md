@@ -204,7 +204,8 @@ ports from that value:
 Pick bases whose ranges do not intersect on the same protocol. The tracked
 example uses `47989`; a second preset on `48006` does not overlap it. Run
 `make check-ports P=".env.zzz:.env.other"` before starting a set; `up` and
-`restart` run the same check. Clients that only use the default port cannot
+`restart` run the same check. `make ports P=".env.zzz:.env.other"` prints the
+derived table for those presets. Clients that only use the default port cannot
 reach a preset with a custom base port.
 
 Both sessions share one GPU, so VRAM, memory bandwidth, and the driver's NVENC

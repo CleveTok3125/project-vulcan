@@ -362,6 +362,7 @@ check_section 'logs needs one preset' 'logs' "$single"
 check_section 'clean-all needs one preset' 'clean-all' "$single"
 check_section 'up accepts a list' 'up' "$listed"
 check_section 'uninstall accepts a list' 'uninstall' "$listed"
+check_section 'ports accepts a list' 'ports' "$listed"
 
 # Each section separates its groups with a blank line.
 if [ "$(count_blank "$shared")" -ge 2 ]; then

@@ -92,7 +92,7 @@ endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help base base-rebuild rm-base images volume volumes _volume-name build up rebuild _recreate stop down restart logs ps up-all down-all stop-all restart-all ps-all build-all stats-all uninstall-all check-ports _check-presets _check-ports config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
+.PHONY: help base base-rebuild rm-base images volume volumes _volume-name build up rebuild _recreate stop down restart logs ps up-all down-all stop-all restart-all ps-all build-all stats-all uninstall-all check-ports ports _check-presets _check-ports config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
 
 # The table keeps the file order of the targets inside each section. A `# ---`
 # line between blocks starts a new group, which the table separates with a blank
@@ -347,6 +347,9 @@ stats-all: stats
 uninstall-all: uninstall
 
 check-ports: _check-ports ## [presets] Check that Apollo port ranges do not overlap
+
+ports: _check-presets ## [presets] Show the Apollo ports for every listed preset
+	@scripts/show-ports.sh $(P_LIST)
 
 _check-presets:
 	@test -n "$(strip $(P))" || { printf '%s\n' 'set P to a preset or a colon-separated list' >&2; exit 1; }
