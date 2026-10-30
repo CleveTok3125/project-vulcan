@@ -169,6 +169,9 @@ Each game gets its own container `vulcan-<GAME_ID>`, compose project, and
 volume `vulcan_<GAME_ID>-data`. Volumes of games that are no longer configured
 remain on the host; remove them with `docker volume rm`.
 
+`make volumes` lists every Vulcan volume; add
+`PRESETS=".env.zzz:.env.other"` to list only those presets.
+
 Start or stop several presets in one call. The list is colon-separated, and
 every entry must exist before the first container starts:
 

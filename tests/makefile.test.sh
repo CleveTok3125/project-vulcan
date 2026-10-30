@@ -40,7 +40,7 @@ run_make() {
 
 # `make -n` prints the help recipe instead of running it.
 run_help() {
-    (cd "$workdir" && make --no-print-directory help)
+    (cd "$workdir" && make --no-print-directory help "$@")
 }
 
 # The default configuration file keeps working without arguments.
@@ -272,6 +272,106 @@ check_contains 'container targets need a preset' 'preset .env.local does not exi
 out="$(run_help)"
 check_contains 'help without env file' 'Show available targets' "$out"
 check_contains 'help lists the group targets' 'up-all' "$out"
+check_contains 'help reports the preset' 'PRESET=.env.local' "$out"
+check_contains 'help marks an absent preset list' 'PRESETS=(unset)' "$out"
+
+out="$(run_help PRESETS=".env.local:preset.env")"
+check_contains 'help reports the preset list' 'PRESETS=.env.local:preset.env' "$out"
+
+# help_section prints the rows below one heading, up to the next heading.
+help_section() {
+    printf '%s\n' "$out" | awk -v heading="$1:" '
+        $0 == heading { inside = 1 ; next }
+        inside && /^[^ ]/ { exit }
+        inside { print }'
+}
+
+check_section() {
+    local label="$1" target="$2" section="$3"
+    if printf '%s\n' "$section" | awk -v name="$target" '$1 == name { found = 1 } END { exit !found }'; then
+        printf 'ok   %s\n' "$label"
+    else
+        printf 'FAIL %s: %s is not listed there\n' "$label" "$target" >&2
+        failures=$((failures + 1))
+    fi
+}
+
+count_blank() {
+    printf '%s\n' "$1" | grep -c '^$' || true
+}
+
+check_order() {
+    local label="$1" section="$2" first="$3" second="$4"
+    local first_line second_line
+    first_line="$(printf '%s\n' "$section" | awk -v name="$first" '$1 == name { print NR ; exit }')"
+    second_line="$(printf '%s\n' "$section" | awk -v name="$second" '$1 == name { print NR ; exit }')"
+    if [ -n "$first_line" ] && [ -n "$second_line" ] && [ "$first_line" -lt "$second_line" ]; then
+        printf 'ok   %s\n' "$label"
+    else
+        printf 'FAIL %s: %s at %s, %s at %s\n' "$label" "$first" "${first_line:-?}" "$second" "${second_line:-?}" >&2
+        failures=$((failures + 1))
+    fi
+}
+
+out="$(run_help)"
+check_contains 'help names the shared section' 'Shared (no preset):' "$out"
+check_contains 'help names the single preset section' 'One preset (PRESET=<path>):' "$out"
+check_contains 'help names the preset list section' 'Several presets (PRESETS=<a>:<b>):' "$out"
+
+shared="$(help_section 'Shared (no preset)')"
+single="$(help_section 'One preset (PRESET=<path>)')"
+listed="$(help_section 'Several presets (PRESETS=<a>:<b>)')"
+
+check_section 'base needs no preset' 'base' "$shared"
+check_section 'images need no preset' 'images' "$shared"
+check_section 'up needs one preset' 'up' "$single"
+check_section 'clean-all needs one preset' 'clean-all' "$single"
+check_section 'up-all needs the preset list' 'up-all' "$listed"
+check_section 'uninstall-all needs the preset list' 'uninstall-all' "$listed"
+
+# Each section separates its groups with a blank line.
+if [ "$(count_blank "$shared")" -ge 2 ]; then
+    printf 'ok   shared groups are separated\n'
+else
+    printf 'FAIL shared groups are separated: %s blank lines\n' "$(count_blank "$shared")" >&2
+    failures=$((failures + 1))
+fi
+if [ "$(count_blank "$single")" -ge 4 ]; then
+    printf 'ok   single preset groups are separated\n'
+else
+    printf 'FAIL single preset groups are separated: %s blank lines\n' "$(count_blank "$single")" >&2
+    failures=$((failures + 1))
+fi
+if [ "$(count_blank "$listed")" -ge 2 ]; then
+    printf 'ok   preset list groups are separated\n'
+else
+    printf 'FAIL preset list groups are separated: %s blank lines\n' "$(count_blank "$listed")" >&2
+    failures=$((failures + 1))
+fi
+
+check_order 'single preset starts with build' "$single" 'build' 'up'
+check_order 'single preset ends with uninstall' "$single" 'clean-all' 'uninstall'
+check_order 'cleanup runs before uninstall' "$single" 'clean-logs' 'uninstall'
+check_order 'preset list starts with build-all' "$listed" 'build-all' 'up-all'
+check_order 'preset list ends with uninstall-all' "$listed" 'stats-all' 'uninstall-all'
+
+duplicates="$(printf '%s\n' "$out" | awk '/^  [a-zA-Z0-9_-]+ / { print $1 }' | sort | uniq -d)"
+if [ -z "$duplicates" ]; then
+    printf 'ok   help lists every target once\n'
+else
+    printf 'FAIL help lists every target once: duplicated [%s]\n' "$duplicates" >&2
+    failures=$((failures + 1))
+fi
+
+# A target with a description but no scope tag stops make at parse time.
+guarddir="$workdir/guard"
+mkdir -p "$guarddir"
+cp "$repo_root/Makefile" "$guarddir/Makefile"
+cp -r "$repo_root/docker" "$guarddir/docker"
+printf 'GAME_ID=zzz\n' >"$guarddir/.env.local"
+printf 'bogus: ## Missing the scope tag\n' >>"$guarddir/Makefile"
+guard_out="$(cd "$guarddir" && make --no-print-directory help 2>&1 || true)"
+check_contains 'help rejects an untagged target' 'tag: bogus' "$guard_out"
 
 if [ "$failures" -ne 0 ]; then
     printf '%s check(s) failed\n' "$failures" >&2
