@@ -203,6 +203,30 @@ fn classify(name: &str) -> u8 {
     KIND_PASSTHROUGH
 }
 
+fn socket_path_from(explicit: Option<&str>, runtime: Option<&str>) -> Option<String> {
+    if let Some(path) = explicit.filter(|path| !path.is_empty()) {
+        return Some(path.to_string());
+    }
+    runtime.map(|runtime| format!("{runtime}/vulcan-input.sock"))
+}
+
+/// Returns the session input socket.
+///
+/// `VULCAN_INPUT_SOCKET` names the socket explicitly; the runtime directory is
+/// only a fallback for a process started outside `session-start.sh`.
+fn socket_path() -> Option<String> {
+    let explicit = std::env::var("VULCAN_INPUT_SOCKET").ok();
+    let runtime = std::env::var("XDG_RUNTIME_DIR").ok();
+    let path = socket_path_from(explicit.as_deref(), runtime.as_deref());
+    if path.is_none() {
+        static LOGGED: OnceLock<()> = OnceLock::new();
+        LOGGED.get_or_init(|| {
+            eprintln!("[vulcan-shim] no input socket configured; dropping input");
+        });
+    }
+    path
+}
+
 fn send_event(event: Event) {
     let mut guard = match SOCKET.lock() {
         Ok(guard) => guard,
@@ -210,11 +234,9 @@ fn send_event(event: Event) {
     };
 
     if guard.is_none() {
-        let path = std::env::var("VULCAN_INPUT_SOCKET").unwrap_or_else(|_| {
-            let runtime = std::env::var("XDG_RUNTIME_DIR")
-                .unwrap_or_else(|_| "/run/user/1000".to_string());
-            format!("{runtime}/vulcan-input.sock")
-        });
+        let Some(path) = socket_path() else {
+            return;
+        };
         match UnixStream::connect(path) {
             Ok(stream) => {
                 *guard = Some(stream);
@@ -491,6 +513,31 @@ mod tests {
         assert_eq!(scale_touch(19200, 19200), TOUCH_RANGE);
         assert_eq!(scale_touch(9600, 19200), TOUCH_RANGE / 2);
         assert_eq!(scale_touch(10800, 10800), TOUCH_RANGE);
+    }
+
+    #[test]
+    fn socket_path_prefers_the_explicit_variable() {
+        assert_eq!(
+            socket_path_from(Some("/run/user/1000/custom.sock"), Some("/run/user/1000")),
+            Some("/run/user/1000/custom.sock".to_string())
+        );
+    }
+
+    #[test]
+    fn socket_path_falls_back_to_the_runtime_directory() {
+        assert_eq!(
+            socket_path_from(None, Some("/run/user/1000")),
+            Some("/run/user/1000/vulcan-input.sock".to_string())
+        );
+        assert_eq!(
+            socket_path_from(Some(""), Some("/run/user/1000")),
+            Some("/run/user/1000/vulcan-input.sock".to_string())
+        );
+    }
+
+    #[test]
+    fn socket_path_requires_configuration() {
+        assert_eq!(socket_path_from(None, None), None);
     }
 
     #[test]

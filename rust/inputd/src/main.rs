@@ -310,11 +310,11 @@ impl Backend {
         }
         self.last_attempt = Some(Instant::now());
 
-        let Some(socket) = find_eis_socket() else {
+        let Some(socket_path) = find_eis_socket() else {
             self.log_wait("waiting for gamescope EIS socket");
             return false;
         };
-        let Ok(socket) = CString::new(socket.to_string_lossy().as_bytes()) else {
+        let Ok(socket) = CString::new(socket_path.to_string_lossy().as_bytes()) else {
             return false;
         };
 
@@ -340,7 +340,10 @@ impl Backend {
         }
 
         if self.emulation.active() {
-            eprintln!("[vulcan-inputd] connected to gamescope EIS");
+            eprintln!(
+                "[vulcan-inputd] connected to gamescope EIS on {}",
+                socket_path.display()
+            );
         }
         self.emulation.active()
     }
@@ -689,6 +692,27 @@ fn socket_is_live(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Returns the live `*-ei` socket in `directory`, the naming gamescope uses.
+fn socket_in(directory: &Path) -> Option<PathBuf> {
+    for entry in std::fs::read_dir(directory).ok()?.flatten() {
+        let path = entry.path();
+        let named = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.ends_with("-ei"));
+        if named && socket_is_live(&path) {
+            return Some(path);
+        }
+    }
+    None
+}
+
+/// Resolves the EIS socket of this container's gamescope.
+///
+/// Only paths that belong to the container are inspected: the explicit
+/// override, the environment of the processes in this PID namespace, and the
+/// session runtime directory. Ambient directories shared with the host or with
+/// another session are not searched.
 fn find_eis_socket() -> Option<PathBuf> {
     if let Ok(path) = std::env::var("VULCAN_EIS_SOCKET") {
         let path = PathBuf::from(path);
@@ -728,29 +752,8 @@ fn find_eis_socket() -> Option<PathBuf> {
         }
     }
 
-    let mut candidates = Vec::new();
     if let Ok(runtime) = std::env::var("XDG_RUNTIME_DIR") {
-        candidates.push(PathBuf::from(runtime));
-    }
-    candidates.push(PathBuf::from("/run/user/1000"));
-    candidates.push(PathBuf::from("/games/zzz"));
-    candidates.push(PathBuf::from("/tmp"));
-
-    for directory in candidates {
-        let Ok(entries) = std::fs::read_dir(&directory) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.ends_with("-ei"))
-                && socket_is_live(&path)
-            {
-                return Some(path);
-            }
-        }
+        return socket_in(Path::new(&runtime));
     }
 
     None
@@ -791,6 +794,22 @@ mod tests {
             connected: 1,
             padding: [0; 7],
         }
+    }
+
+    #[test]
+    fn finds_only_live_ei_sockets() {
+        let directory = std::env::temp_dir().join(format!("vulcan-eis-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+
+        std::fs::write(directory.join("stale-ei"), b"").unwrap();
+        assert_eq!(socket_in(&directory), None);
+
+        let listener = UnixListener::bind(directory.join("live-ei")).unwrap();
+        assert_eq!(socket_in(&directory), Some(directory.join("live-ei")));
+
+        drop(listener);
+        std::fs::remove_dir_all(&directory).unwrap();
     }
 
     #[test]
@@ -931,11 +950,20 @@ mod tests {
 }
 
 fn main() -> io::Result<()> {
-    let socket_path = std::env::var("VULCAN_INPUT_SOCKET").unwrap_or_else(|_| {
-        let runtime = std::env::var("XDG_RUNTIME_DIR")
-            .unwrap_or_else(|_| "/run/user/1000".to_string());
-        format!("{runtime}/vulcan-input.sock")
-    });
+    let socket_path = std::env::var("VULCAN_INPUT_SOCKET")
+        .ok()
+        .filter(|path| !path.is_empty())
+        .or_else(|| {
+            std::env::var("XDG_RUNTIME_DIR")
+                .ok()
+                .map(|runtime| format!("{runtime}/vulcan-input.sock"))
+        })
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                "VULCAN_INPUT_SOCKET or XDG_RUNTIME_DIR is required",
+            )
+        })?;
     let _ = std::fs::remove_file(&socket_path);
     let listener = UnixListener::bind(&socket_path)?;
     use std::os::unix::fs::PermissionsExt;
