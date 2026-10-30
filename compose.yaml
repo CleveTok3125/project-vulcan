@@ -31,19 +31,11 @@ services:
     devices:
       - "${RENDER_NODE:?set RENDER_NODE in the selected env file}"
 
-    # Input event nodes are created on demand by the in-container broker.
-    device_cgroup_rules:
-      - "c 13:* rwm"
-
     cap_drop:
       - ALL
     cap_add:
-      # The entrypoint creates the volume paths as the game user; only the
-      # broker, the mounts, and the privilege drop need capabilities.
-      - MKNOD
-      # The broker sends synthetic udev events from its private netns.
-      - NET_ADMIN
-      # Required for the overlay mount and for `ip netns add`.
+      # The entrypoint creates the volume paths as the game user, so the
+      # mounts and the privilege drop need capabilities.
       - SYS_ADMIN
       # Overlayfs copy-up runs with the credentials of the process that
       # mounted the overlay. Without CHOWN, writes to paths that exist only
@@ -82,12 +74,8 @@ services:
       GAMESCOPE_HIDE_CURSOR_DELAY: "${GAMESCOPE_HIDE_CURSOR_DELAY:-86400000}"
       GAMESCOPE_TOUCH_MODE: "${GAMESCOPE_TOUCH_MODE:-4}"
       GAMESCOPE_FORCE_WINDOWS_FULLSCREEN: "${GAMESCOPE_FORCE_WINDOWS_FULLSCREEN:-1}"
-      INPUT_BROKER: "${INPUT_BROKER:-1}"
-      INPUT_BACKEND: "${INPUT_BACKEND:-native}"
       INPUT_TRANSPORT: "${INPUT_TRANSPORT:-socket}"
       INPUT_GAMEPAD: "${INPUT_GAMEPAD:-1}"
-      INPUT_DISPLAY: "${INPUT_DISPLAY:-}"
-      INPUT_EXTRA_NAMES: "${INPUT_EXTRA_NAMES:-Sunshine X-Box One (virtual) pad,Sunshine PS5 (virtual) pad,Sunshine Nintendo (virtual) pad}"
       ENABLE_OVERLAY: "${ENABLE_OVERLAY:-1}"
 
       RENDER_NODE: "${RENDER_NODE:?set RENDER_NODE in the selected env file}"
@@ -110,7 +98,6 @@ services:
       NVIDIA_VISIBLE_DEVICES: "${NVIDIA_VISIBLE_DEVICES:-0}"
       NVIDIA_DRIVER_CAPABILITIES: "all"
 
-      GID_INPUT: "${GID_INPUT:?set GID_INPUT in .env}"
       GID_RENDER: "${GID_RENDER:?set GID_RENDER in .env}"
       GID_VIDEO: "${GID_VIDEO:?set GID_VIDEO in .env}"
       GID_STORAGE: "${GID_STORAGE:-}"

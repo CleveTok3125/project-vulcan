@@ -43,7 +43,6 @@ GAME_EXE=/games/${game_id}/game.exe
 RENDER_NODE=/dev/dri/renderD128
 SPRITZ_DIR=/wine
 APOLLO_PORT=${apollo_port}
-GID_INPUT=1000
 GID_RENDER=1000
 GID_VIDEO=1000
 EOF
@@ -62,6 +61,10 @@ check_project() {
     check_contains "${label} volume name" "name: vulcan_${game_id}-data" "$config"
     check_contains "${label} apollo port" "APOLLO_PORT: \"${apollo_port}\"" "$config"
     check_missing "${label} leaves the other game alone" "vulcan-${other_game_id}" "$config"
+    check_missing "${label} passes no input devices" "c 13:" "$config"
+    check_missing "${label} does not add mknod" "- MKNOD" "$config"
+    check_missing "${label} does not add net_admin" "- NET_ADMIN" "$config"
+    check_missing "${label} has no kernel input env" "INPUT_BACKEND" "$config"
 }
 
 write_preset "$workdir/first.env" demo-one 47989

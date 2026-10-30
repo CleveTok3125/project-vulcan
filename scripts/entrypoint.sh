@@ -29,13 +29,9 @@ export XDG_CACHE_HOME="/data/home/.cache"
 export XDG_DATA_HOME="/data/home/.local/share"
 export HOME="/data/home"
 
-install -d -m 0755 /dev/input /run/udev /run/udev/data /run/udev/rules.d
 install -d -m 0755 "$GAME_PATH"
 if [ ! -e /var/run ] && [ ! -L /var/run ]; then
     ln -s /run /var/run
-fi
-if [ ! -e /run/udev/control ]; then
-    touch /run/udev/control
 fi
 
 cleanup() {
@@ -52,14 +48,13 @@ read_gid() {
     stat -c '%g' "$1" 2>/dev/null || printf '0\n'
 }
 
-GID_INPUT="${GID_INPUT:-$(read_gid /dev/input)}"
 GID_RENDER="${GID_RENDER:-$(read_gid "$RENDER_NODE")}"
 GID_VIDEO="${GID_VIDEO:-$(read_gid "$RENDER_NODE")}"
 GID_STORAGE="${GID_STORAGE:-$(read_gid /dev/dri/card0)}"
 GID_SEAT="$(getent group seat | cut -d: -f3 || true)"
 
 GROUP_LIST="$(
-    printf '%s\n' "$GID_INPUT" "$GID_RENDER" "$GID_VIDEO" "$GID_STORAGE" "$GID_SEAT" \
+    printf '%s\n' "$GID_RENDER" "$GID_VIDEO" "$GID_STORAGE" "$GID_SEAT" \
         | awk '/^[0-9]+$/ && $1 != 0' \
         | sort -nu \
         | paste -sd, -
@@ -139,71 +134,9 @@ as_game env \
         pactl set-default-sink vulcan_game >/dev/null 2>&1 || true
     ' >/data/log/audio.log 2>&1 || true
 
-INPUT_BACKEND="${INPUT_BACKEND:-native}"
-case "$INPUT_BACKEND" in
-    native)
-        SWAY_BACKENDS="headless,libinput"
-        # libseat's noop backend opens /dev/input with the game user's
-        # permissions. No seatd or logind is available in the container.
-        # The preload grabs each event node opened by libinput so the host
-        # compositor cannot consume the same stream input.
-        SWAY_INPUT_ENV=(
-            LIBSEAT_BACKEND=noop
-            WLR_LIBINPUT_NO_DEVICES=1
-            LD_PRELOAD=/usr/lib/libvulcan-input-grab.so
-        )
-        ;;
-    xtest)
-        SWAY_BACKENDS="headless"
-        SWAY_INPUT_ENV=()
-        ;;
-    *)
-        die "unsupported INPUT_BACKEND: $INPUT_BACKEND"
-        ;;
-esac
-
-INPUT_NETNS=""
-if [ "${INPUT_NETNS_ENABLED:-1}" = "1" ]; then
-    INPUT_NETNS_NAME="${INPUT_NETNS_NAME:-vulcan-input}"
-    ip netns del "$INPUT_NETNS_NAME" 2>/dev/null || true
-    if ip netns add "$INPUT_NETNS_NAME" 2>/dev/null; then
-        INPUT_NETNS="$INPUT_NETNS_NAME"
-        log "broker and Sway run in netns ${INPUT_NETNS}"
-    else
-        log "failed to create input netns; broker udev events reach the host"
-    fi
-fi
-
-netns_cmd=()
-if [ -n "$INPUT_NETNS" ]; then
-    netns_cmd=(ip netns exec "$INPUT_NETNS")
-fi
-
-if [ "${INPUT_BROKER:-1}" = "1" ]; then
-    INPUT_GID="$GID_INPUT" "${netns_cmd[@]}" /usr/local/bin/vulcan-input-broker \
-        >/data/log/input-broker.log 2>&1 &
-fi
-
-if [ "$INPUT_BACKEND" = "xtest" ]; then
-    INPUT_DISPLAY="${INPUT_DISPLAY:-}"
-    if [ -z "$INPUT_DISPLAY" ]; then
-        if [ "${GAMESCOPE_ENABLED:-1}" = "1" ]; then
-            INPUT_DISPLAY=":2"
-        else
-            INPUT_DISPLAY=":1"
-        fi
-    fi
-    "${SETPRIV_CMD[@]}" env \
-        XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
-        DISPLAY="$INPUT_DISPLAY" \
-        bash -c '
-            while true; do
-                /usr/local/bin/vulcan-input-bridge \
-                    >>/data/log/input-bridge.log 2>&1 || true
-                sleep 1
-            done
-        ' &
-fi
+# Input arrives over the socket shim and gamescope EIS, so Sway has no input
+# devices of its own and only needs the headless backend.
+SWAY_BACKENDS="headless"
 
 APOLLO_ENCODER="${APOLLO_ENCODER:-nvenc}"
 APOLLO_NAME="${APOLLO_NAME:-Vulcan-${GAME_ID}}"
@@ -249,9 +182,8 @@ if [ -z "$APOLLO_ADAPTER" ]; then
     rm -f /run/sunshine.conf
 fi
 
-log "starting Sway with ${SWAY_BACKENDS} (input: ${INPUT_BACKEND})"
-"${netns_cmd[@]}" "${SETPRIV_CMD[@]}" env \
-    "${SWAY_INPUT_ENV[@]}" \
+log "starting Sway with ${SWAY_BACKENDS}"
+"${SETPRIV_CMD[@]}" env \
     DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
     XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
     PULSE_SERVER="$PULSE_SERVER" \
@@ -267,9 +199,8 @@ log "starting Sway with ${SWAY_BACKENDS} (input: ${INPUT_BACKEND})"
 
 SWAY_PID=$!
 
-# Apollo joins the host network namespace while Sway and the broker stay in
-# the private one. Wayland and X11 sockets are filesystem objects, so the
-# split does not affect capture or the game.
+# Apollo runs in the container network namespace; Sway stays there too.
+# Wayland and X11 sockets are filesystem objects, so capture is unaffected.
 "${SETPRIV_CMD[@]}" env \
     DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
     XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \

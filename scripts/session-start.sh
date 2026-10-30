@@ -1,8 +1,8 @@
 #!/bin/bash
 set -Eeuo pipefail
 
-# Only sway needs the input-grab preload. Socket input uses a separate shim
-# loaded into Apollo only.
+# Input reaches Apollo through the socket shim, which is loaded only into
+# Apollo. Sway has no input devices and no preload.
 INPUT_TRANSPORT="${INPUT_TRANSPORT:-socket}"
 
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/1000}"

@@ -15,11 +15,6 @@ mouse_warping none
 
 xwayland enable
 
-# libinput takes these devices from the broker. Touch is mapped to the only
-# output, and pointer acceleration stays linear for streamed relative input.
-input type:touch map_to_output HEADLESS-1
-input type:pointer accel_profile flat
-
 # gamescope is the only visible client. It also requests fullscreen itself.
 for_window [app_id="gamescope"] fullscreen enable
 for_window [class="gamescope"] fullscreen enable

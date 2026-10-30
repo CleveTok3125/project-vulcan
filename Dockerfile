@@ -51,8 +51,7 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
         -o /out/xinput1_4.dll \
         /src/xinput1_4.c /src/xinput1_4.def \
         -Wl,--no-insert-timestamp \
-    && gcc -O2 -shared -fPIC -o /out/libglycin-nosandbox.so /src/glycin-nosandbox.c -ldl \
-    && gcc -O2 -shared -fPIC -o /out/libvulcan-input-grab.so /src/input-grab.c -ldl
+    && gcc -O2 -shared -fPIC -o /out/libglycin-nosandbox.so /src/glycin-nosandbox.c -ldl
 
 FROM ${BASE_IMAGE} AS rust-builder
 
@@ -72,12 +71,9 @@ RUN pacman -U --noconfirm /tmp/apollo/*.pkg.tar.zst && rm -rf /tmp/apollo
 
 COPY --from=native-builder /out/xinput1_4.dll /usr/lib/vulcan/xinput1_4.dll
 COPY --from=native-builder /out/libglycin-nosandbox.so /usr/lib/libglycin-nosandbox.so
-COPY --from=native-builder /out/libvulcan-input-grab.so /usr/lib/libvulcan-input-grab.so
 
 COPY --from=rust-builder /build/target/release/libvulcan_uinput_shim.so /usr/lib/libvulcan_uinput_shim.so
 COPY --from=rust-builder /build/target/release/vulcan-inputd /usr/local/bin/vulcan-inputd
-COPY --from=rust-builder /build/target/release/vulcan-input-broker /usr/local/bin/vulcan-input-broker
-COPY --from=rust-builder /build/target/release/vulcan-input-bridge /usr/local/bin/vulcan-input-bridge
 
 RUN mkdir -p /config/apollo /data /games /games-ro \
     && chown -R 1000:1000 /data /games
@@ -90,11 +86,8 @@ COPY scripts /usr/local/bin
 # setcap -r exits non-zero when the file carries no capability. A package built
 # without file capabilities is already in the desired state.
 RUN chmod 0755 \
-        /usr/lib/libvulcan-input-grab.so \
         /usr/local/bin/*.sh \
         /usr/local/bin/vulcan-inputd \
-        /usr/local/bin/vulcan-input-broker \
-        /usr/local/bin/vulcan-input-bridge \
     && chmod 0644 \
         /usr/lib/vulcan/xinput1_4.dll \
         /config/sway/config.in \

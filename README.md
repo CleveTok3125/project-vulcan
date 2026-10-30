@@ -16,7 +16,7 @@ Docker (rootful)
    │  └─ wine + game
    ├─ Apollo (capture=wlr, NVENC)
    ├─ PipeWire null sink
-   └─ input broker (event nodes -> private /dev/input)
+   └─ vulcan-inputd (socket -> gamescope EIS)
 ```
 
 The container receives the render node named by `RENDER_NODE`. On NVIDIA it
@@ -48,9 +48,9 @@ which is not available in this container.
 
 ### Groups
 
-Set `GID_INPUT` to the numeric GID of `/dev/input`. `GID_RENDER` and
-`GID_VIDEO` are the render/video GIDs. `GID_UINPUT` and host udev rules are
-no longer used.
+`GID_RENDER` and `GID_VIDEO` are the render/video GIDs. `GID_STORAGE` is
+optional. Input devices are not passed to the container, so no input GID is
+needed.
 
 ## Build cache
 
@@ -197,17 +197,15 @@ These steps start from a checkout with no image, volume, or `.env.local`.
 The `make` targets pass `compose.nvidia.yaml`; on AMD/Intel hosts use the raw
 `docker compose --env-file .env.local` form without that file.
 
-1. Read the host device group IDs. Use an input event node, not the
-   `/dev/input` directory, which belongs to root and reports `0`:
+1. Read the render node group:
 
    ```bash
-   stat -c '%g %n' /dev/input/event* /dev/dri/renderD128
+   stat -c '%g %n' /dev/dri/renderD128
    ```
 
-   The values are `GID_INPUT` and `GID_RENDER`. `GID_VIDEO` is the numeric
-   video group from `getent group video`; compose requires it.
-   When the host has no event node, `getent group input` gives `GID_INPUT`.
-   A device owned by group `0` cannot be read by the game user.
+   The value is `GID_RENDER`. `GID_VIDEO` is the numeric video group from
+   `getent group video`; compose requires it. A node owned by group `0`
+   cannot be read by the game user.
 
 2. Choose the render node of the encoder GPU. The node numbering does not
    follow the card numbering, and a node from the wrong vendor leaves Apollo
@@ -478,15 +476,10 @@ the socket exists only while the container runs.
 Set `INPUT_GAMEPAD=0` to skip both the pad state file and the DLL. Games that
 use DirectInput or raw HID instead of XInput do not see a controller.
 
-The input broker mirrors Apollo's remaining uinput nodes into the container's
-private `/dev/input` and emits udev events so libinput can hotplug them. Sway
-preloads `/usr/lib/libvulcan-input-grab.so`; the library calls `EVIOCGRAB` on
-each event node so only Sway receives it. No host udev rule is installed.
-
-Sway runs with `WLR_BACKENDS=headless,libinput` and libseat's `noop` backend.
-`GAMESCOPE_TOUCH_MODE` controls gamescope's touch handling. Pointer and keyboard
-input reaches the game through gamescope, so Sway itself has no pointer device
-and does not draw the streamed cursor.
+Sway runs with `WLR_BACKENDS=headless`. `GAMESCOPE_TOUCH_MODE` controls
+gamescope's touch handling. Pointer and keyboard input reaches the game
+through gamescope EIS, so Sway has no input device and does not draw the
+streamed cursor.
 
 ### Multi-touch
 
@@ -498,12 +491,6 @@ forwarding path becomes active once gamescope advertises the capability; until
 then keep the client in a mouse mode, where touch arrives as absolute mouse
 events.
 
-`INPUT_BACKEND=xtest` falls back to `vulcan-input-bridge`, which grabs the event
-nodes with `EVIOCGRAB` and injects them into gamescope's Xwayland display with
-XTest. With gamescope enabled the bridge targets `:2`; without gamescope it
-targets Sway's Xwayland at `:1`. Override with `INPUT_DISPLAY`. That path
-supports one pointer only and provides no Sway cursor.
-
 Logs:
 
 ```bash
@@ -511,49 +498,35 @@ docker compose exec game tail -f /data/log/sway.log
 docker compose exec game tail -f /data/log/vulcan-inputd.log
 ```
 
-### Input broker
+### Session isolation
 
-`vulcan-input-broker` watches for the fixed inputtino device names and creates
-the corresponding event nodes in the container's private `/dev/input`. It
-writes udev database records and emits udev netlink events so libinput can
-hotplug them.
+Each container owns its input socket, runtime directory, and gamescope
+instance, so two presets can stream at the same time without sharing input.
+The shim sends events to `VULCAN_INPUT_SOCKET` and `vulcan-inputd` connects to
+the EIS socket of its own gamescope. Set `VULCAN_EIS_SOCKET` to override the
+discovered path.
 
-uinput devices live in the shared kernel and carry no marker that names their
-creator, so the broker only takes devices that appeared after it started: the
-nodes another running session created earlier stay in the baseline.
-
-Virtual gamepads are not exposed as host devices; they are handled by the
-XInput proxy in the Wine prefix.
-
-### Known input limitation
-
-The broker publishes event nodes into the container network namespace. With
-`network_mode: host`, udev netlink events are shared with the host. If the
-host libinput reacts to those events, use the broker's private udev database
-or switch the container to a private network namespace.
+No input device is created in the host kernel, so neither session can see or
+grab the other's devices.
 
 ## Security
 
-This is a rootful container with `CAP_MKNOD` and the capabilities listed
-below. It can create input nodes inside the container; it does not receive
-`/dev/uinput` or `/dev/uhid` and does not install host udev rules. Run only
-trusted game images, and treat the container as part of the host trust
-boundary.
+This is a rootful container with the capabilities listed below. It does not
+receive `/dev/uinput`, `/dev/uhid`, or host input devices, and does not install
+host udev rules. Run only trusted game images, and treat the container as part
+of the host trust boundary.
 
 Additional hardening:
 
 - keep `read_only: true`
 - keep `cap_drop: ALL`
-- add only what the entrypoint needs: `MKNOD` for the input broker,
-  `NET_ADMIN` for the broker's synthetic udev event, `SYS_ADMIN` for the
-  overlay mount and `ip netns add`, `CHOWN` for the overlayfs copy-up done
-  with the mounter's credentials, `DAC_OVERRIDE` for the root writes into
-  the game-owned volume (including the overlay upper directory), and
-  `SETUID`/`SETGID` to drop to the game user
+- add only what the entrypoint needs: `SYS_ADMIN` for the overlay mount,
+  `CHOWN` for the overlayfs copy-up done with the mounter's credentials,
+  `DAC_OVERRIDE` for the root writes into the game-owned volume (including
+  the overlay upper directory), and `SETUID`/`SETGID` to drop to the game user
 - keep the game process unprivileged: it receives no capabilities, and
   `CHOWN` only applies to the overlay mount created by the entrypoint
-- after startup the entrypoint continues as the game user, and the broker
-  drops to `MKNOD` and `NET_ADMIN`
+- after startup the entrypoint continues as the game user
 - keep `no-new-privileges:true`
 - pass only the DRM nodes the encoder needs: on NVIDIA the primary card node
   plus `RENDER_NODE`; on AMD/Intel only the render node
@@ -569,7 +542,8 @@ Additional hardening:
   host Avahi socket to the container.
 - gamescope adds a second compositor. Disable it if latency or frame pacing is
   worse.
-- Docker AppArmor may block `mknod`; test or install a custom profile.
+- Docker AppArmor may block the overlay mount; test or install a custom
+  profile.
 - Multi-touch does not reach the game: gamescope 3.17 has no EIS touch
   capability.
 
@@ -578,9 +552,7 @@ Additional hardening:
 ```bash
 # inside container
 ls -l /dev/dri
-ls -l /dev/input
 swaymsg -t get_outputs
-swaymsg -t get_inputs
 vulkaninfo --summary
 ffmpeg -hide_banner -encoders | grep nvenc
 ```
@@ -589,8 +561,5 @@ Expected:
 
 - `HEADLESS-1` at 1920x1080@144
 - `RENDER_NODE` and, on NVIDIA, the primary card node
-- only expected input event nodes
-- `swaymsg -t get_inputs` lists the passthrough devices while a client is
-  connected
 - Apollo logs show `Screencasting with Wayland's protocol`
 - host session remains usable while streaming
