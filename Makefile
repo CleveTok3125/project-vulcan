@@ -231,7 +231,8 @@ uninstall: ## [preset] Remove the container, its data, and the image
 	@test "$(CONFIRM)" = "1" || { printf '%s\n' 'Refusing uninstall: run make uninstall CONFIRM=1'; exit 1; }
 	$(COMPOSE) down -v
 	@if docker image inspect $(IMAGE) >/dev/null 2>&1; then \
-		docker rmi $(IMAGE); \
+		docker rmi $(IMAGE) 2>/dev/null || \
+			printf '[vulcan] image %s is still used by another container; leaving it\n' '$(IMAGE)' >&2; \
 	else \
 		printf 'image %s is already absent\n' '$(IMAGE)'; \
 	fi

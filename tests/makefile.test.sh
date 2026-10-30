@@ -171,6 +171,7 @@ check_contains 'session shell sets the wayland display' 'WAYLAND_DISPLAY=' "$out
 out="$(run_make uninstall CONFIRM=1 PRESET=preset.env)"
 check_contains 'uninstall uses the explicit preset' '--env-file preset.env' "$out"
 check_contains 'uninstall removes the image' 'docker rmi vulcan/game-stream:local-' "$out"
+check_contains 'uninstall keeps an image another preset uses' 'still used by another container' "$out"
 
 # The shared base image is built once and reused by the game image.
 out="$(run_make base)"

@@ -72,7 +72,7 @@ The base tag hashes that file and `MIRROR_COUNTRY`; the game tag hashes the base
 tag, `GPU_VENDOR`, `APOLLO_PKG`, and `APOLLO_COMMIT`. Editing scripts or config
 rebuilds the last layers only, an Apollo bump rebuilds the Apollo stage only,
 and a package change rebuilds the base and everything above it. `uninstall`
-removes the game image.
+removes the game image once no container uses it.
 
 Calling Compose without `make`, such as the AMD/Intel form above, needs the
 base image first: run `make base` and pass `BASE_IMAGE` to the build, or build
@@ -204,8 +204,9 @@ default port cannot reach a preset with a custom base port.
 
 Both sessions share one GPU, so VRAM, memory bandwidth, and the driver's NVENC
 session limit apply to the sum of the streams. The image and the NVIDIA device
-configuration are shared: run `make down` for every preset before
-`make uninstall`.
+configuration are shared. `make uninstall` removes the container and volume of
+one preset and leaves the image while another preset still uses it;
+`make uninstall-all` removes the image once the last container is gone.
 
 ## Fresh deployment
 
