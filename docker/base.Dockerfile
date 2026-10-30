@@ -95,6 +95,12 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
         tinysparql \
         xorg-xprop
 
+# shared-mime-info is already present in the base image, so its install hook
+# never ran and gio cannot name a single file type. Image loaders reject every
+# file while that database is missing.
+RUN update-mime-database /usr/share/mime \
+    && test -f /usr/share/mime/magic
+
 # aria2c downloads each package over several connections, which matters for
 # the multi-gigabyte CUDA package the Apollo stage pulls. It replaces pacman's
 # parallel package download, so keep it to one transfer at a time.
