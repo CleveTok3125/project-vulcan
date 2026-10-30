@@ -13,7 +13,7 @@ gaps outer 0
 focus_follows_mouse no
 mouse_warping none
 
-xwayland enable
+xwayland @XWAYLAND@
 
 # gamescope is the only visible client. It also requests fullscreen itself.
 for_window [app_id="gamescope"] fullscreen enable

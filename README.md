@@ -484,6 +484,12 @@ gamescope's touch handling. Pointer and keyboard input reaches the game
 through gamescope EIS, so Sway has no input device and does not draw the
 streamed cursor.
 
+Sway does not start Xwayland while gamescope is enabled: gamescope runs its
+own X server for Wine, and Sway's instance would only compete for the abstract
+X11 socket names that the host already owns, because the container uses the
+host network namespace. `GAMESCOPE_ENABLED=0` re-enables Xwayland for the
+direct Sway path.
+
 ### Multi-touch
 
 The shim forwards the `ABS_MT` sequence from Apollo's touch device and

@@ -172,8 +172,11 @@ sed \
     -e "s|@OUTPUT@|${APOLLO_OUTPUT}|g" \
     /config/apollo/sunshine.conf.in >/data/apollo/sunshine.conf
 
+SWAY_XWAYLAND="$(sway_xwayland "${GAMESCOPE_ENABLED:-1}")"
+
 sed \
     -e "s|@MODE@|${GAME_MODE}|g" \
+    -e "s|@XWAYLAND@|${SWAY_XWAYLAND}|g" \
     /config/sway/config.in >/data/sway/config
 
 if [ -z "$APOLLO_ADAPTER" ]; then

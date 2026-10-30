@@ -17,6 +17,19 @@ derive_app_uuid() {
         "${digest:0:8}" "${digest:8:4}" "${digest:13:3}" "${digest:17:3}" "${digest:20:12}"
 }
 
+# sway_xwayland prints the Sway Xwayland mode.
+#
+# Gamescope runs its own Xwayland for Wine. Sway's instance is unused then and
+# competes with the host for abstract X11 socket names, so it stays off unless
+# the game runs directly under Sway.
+sway_xwayland() {
+    if [ "${1:-1}" = "1" ]; then
+        printf 'disable\n'
+    else
+        printf 'enable\n'
+    fi
+}
+
 # render_apollo_apps writes the Apollo app list for one game.
 #
 # Arguments: template path, output path, app name, app command, app uuid.

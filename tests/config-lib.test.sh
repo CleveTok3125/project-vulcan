@@ -62,6 +62,10 @@ fi
 
 check 'uuid is stable' "$(derive_app_uuid zzz)" "$(derive_app_uuid zzz)"
 
+check 'xwayland is off with gamescope' 'disable' "$(sway_xwayland 1)"
+check 'xwayland is on without gamescope' 'enable' "$(sway_xwayland 0)"
+check 'xwayland defaults to off' 'disable' "$(sway_xwayland)"
+
 if [ "$(derive_app_uuid zzz)" = "$(derive_app_uuid demo)" ]; then
     printf 'FAIL uuid differs per game id\n' >&2
     failures=$((failures + 1))
