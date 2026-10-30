@@ -41,7 +41,10 @@ MIRROR_COUNTRY ?=
 # The shared environment image is built once per host; the game image adds the
 # vendor packages, Apollo, and the session parts on top of it.
 BASE_DOCKERFILE := docker/base.Dockerfile
-BASE_HASH := $(shell sha256sum $(BASE_DOCKERFILE) | cut -c1-12)
+# The base tag follows everything copied into the base image, so a change to
+# the downloader or its package list rebuilds the base.
+BASE_INPUTS := $(BASE_DOCKERFILE) docker/pacman-aria2 docker/aria2-heavy-packages
+BASE_HASH := $(shell cat $(BASE_INPUTS) | sha256sum | cut -c1-12)
 BASE_TAG := local-$(shell printf '%s|%s' "$(MIRROR_COUNTRY)" "$(BASE_HASH)" | sha256sum | cut -c1-12)
 BASE_IMAGE := vulcan/base:$(BASE_TAG)
 export BASE_IMAGE

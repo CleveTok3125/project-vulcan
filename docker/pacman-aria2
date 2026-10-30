@@ -1,0 +1,39 @@
+#!/bin/sh
+# pacman XferCommand: $1 is the URL, $2 is the local path.
+#
+# aria2c only handles the packages listed in aria2-heavy-packages. Database
+# files and signatures are small and must use curl: aria2 can leave a partial
+# or renamed file behind, and pacman then reports an invalid signature.
+name=$(basename "$2")
+name=${name%.part}
+heavy=0
+list=${ARIA2_HEAVY_PACKAGES:-/etc/pacman.d/aria2-heavy-packages}
+
+case "$name" in
+    *.pkg.tar.zst)
+        if [ -r "$list" ]; then
+            while IFS= read -r pattern; do
+                case "$pattern" in
+                    '' | '#'*) continue ;;
+                esac
+                case "$name" in
+                    $pattern)
+                        heavy=1
+                        break
+                        ;;
+                esac
+            done <"$list"
+        fi
+        ;;
+esac
+
+if [ "$heavy" -eq 1 ]; then
+    exec aria2c --console-log-level=error -c -x 16 -s 16 -k 1M \
+        --file-allocation=none --allow-overwrite=true \
+        --auto-file-renaming=false --max-tries=3 --retry-wait=2 \
+        --connect-timeout=10 --timeout=60 \
+        -d "$(dirname "$2")" -o "$(basename "$2")" "$1"
+fi
+
+exec curl -fL -C - --connect-timeout 10 --speed-time 30 --speed-limit 1024 \
+    --retry 2 --retry-delay 1 -o "$2" "$1"

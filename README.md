@@ -68,11 +68,16 @@ mirror setup, the runtime packages, the build tooling, and the game user. The
 game image starts from it and adds only the vendor packages, Apollo, the native
 and Rust artifacts, and the configuration.
 
-The base tag hashes that file and `MIRROR_COUNTRY`; the game tag hashes the base
-tag, `GPU_VENDOR`, `APOLLO_PKG`, and `APOLLO_COMMIT`. Editing scripts or config
+The base tag hashes `docker/base.Dockerfile`, the downloader script, the heavy
+package list, and `MIRROR_COUNTRY`; the game tag hashes the base tag,
+`GPU_VENDOR`, `APOLLO_PKG`, and `APOLLO_COMMIT`. Editing scripts or config
 rebuilds the last layers only, an Apollo bump rebuilds the Apollo stage only,
 and a package change rebuilds the base and everything above it. `uninstall`
 removes the game image once no container uses it.
+
+`docker/pacman-aria2` sends only the packages listed in
+`docker/aria2-heavy-packages` through aria2c. Repository databases, signatures,
+and smaller packages download with curl.
 
 Calling Compose without `make`, such as the AMD/Intel form above, needs the
 base image first: run `make base` and pass `BASE_IMAGE` to the build, or build
