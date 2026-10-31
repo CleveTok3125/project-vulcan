@@ -355,6 +355,7 @@ GBM/EGL interop, so the override passes that node (for example
 
 ```bash
 # make config has already generated .generated/compose.games.yaml
+AUDIO_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/vulcan/<session>" \
 docker compose --env-file .env.local \
   -f compose.yaml -f compose.nvidia.yaml \
   -f .generated/compose.games.yaml up -d
@@ -392,6 +393,9 @@ Defaults:
   `/games/<id>`.
 - Wine: `/data/spritz-wine-tkg/bin/wine64` or `/data/spritz-wine-tkg/bin/wine`,
   with `UMU_USE_STEAM=1`.
+- Audio: Apollo creates its `sink-sunshine-stereo` virtual sink and captures
+  that monitor (`audio_sink = sink-sunshine-stereo`). Game audio is routed to
+  that sink while streaming.
 
 ### OBS capture
 
@@ -433,6 +437,40 @@ Change the reference and rebuild when the host plugin changes.
 Capture is limited to the game process: it does not include gamescope cursor,
 FSR/NIS, HDR tone mapping, or gamescope/Steam overlays. Audio is not captured
 by `obs-vkcapture`.
+
+### OBS audio
+
+Apollo captures `sink-sunshine-stereo.monitor`. To expose the same source to
+host OBS, the session Pulse socket is mounted at a host runtime directory:
+
+```text
+/run/user/<uid>/vulcan/<session>/pulse/native
+```
+
+Expose it with:
+
+```bash
+make audio-up P=.env.multi
+make audio-status P=.env.multi
+make audio-down P=.env.multi
+```
+
+`AUDIO_LATENCY_MSEC` controls the fixed tunnel buffer; the default is `60`.
+Lower values reduce delay, higher values are safer.
+
+`audio-up` loads a host Pulse `module-tunnel-source` named
+`vulcan-<session>-audio`, pointing at `sink-sunshine-stereo.monitor`. The source
+exists only after the Apollo stream starts, so run `audio-up` after starting a
+stream. Add a PulseAudio source in OBS and select that name.
+
+This is opt-in: `make up` does not load the tunnel. The host needs PipeWire or
+PulseAudio with module loading available; the game keeps running if audio
+export fails. Keep OBS audio monitoring off unless host playback is wanted.
+`make stop`, `make down`, and `make uninstall` unload the tunnel; `uninstall`
+also removes the session audio runtime. Use `audio-down` for a manual unload.
+
+`AUDIO_RUNTIME_DIR` defaults to
+`/run/user/<uid>/vulcan/<SESSION_ID>`; set it in the preset to override.
 
 ### Wine environment
 

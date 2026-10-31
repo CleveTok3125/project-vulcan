@@ -39,6 +39,8 @@ APOLLO_COMMIT ?= adc5c5a0bd80831ce495434bb16aee2cd4175fb8
 MIRROR_COUNTRY ?=
 OBS_VKCAPTURE_REF ?= v1.5.6
 GAMES_CATALOG ?= games.yaml
+AUDIO_RUNTIME_DIR ?= $(if $(XDG_RUNTIME_DIR),$(XDG_RUNTIME_DIR),/run/user/$(shell id -u))/vulcan/$(SESSION_ID)
+AUDIO_LATENCY_MSEC ?= 60
 YQ ?= yq
 GAMES_OUTPUT_DIR := .generated
 GAMES_COMPOSE := $(GAMES_OUTPUT_DIR)/compose.games.yaml
@@ -60,7 +62,7 @@ IMAGE_TAG := local-$(shell printf '%s' '$(BASE_TAG)|$(GPU_VENDOR)|$(APOLLO_PKG)|
 IMAGE := vulcan/game-stream:$(IMAGE_TAG)
 export IMAGE_TAG
 
-COMPOSE = docker compose --env-file $(P_SINGLE) -f compose.yaml -f compose.nvidia.yaml -f $(GAMES_COMPOSE)
+COMPOSE = AUDIO_RUNTIME_DIR="$(AUDIO_RUNTIME_DIR)" docker compose --env-file $(P_SINGLE) -f compose.yaml -f compose.nvidia.yaml -f $(GAMES_COMPOSE)
 CONTAINER := vulcan-$(SESSION_ID)
 VOLUME := vulcan_$(SESSION_ID)-data
 
@@ -97,7 +99,7 @@ endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help base base-rebuild rm-base images volume volumes _volume-name build up rebuild _recreate stop down restart logs ps up-all down-all stop-all restart-all ps-all build-all stats-all uninstall-all check-ports ports _check-presets _check-ports _games-config config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
+.PHONY: help base base-rebuild rm-base images volume volumes _volume-name build up rebuild _recreate stop down restart logs ps up-all down-all stop-all restart-all ps-all build-all stats-all uninstall-all check-ports ports _check-presets _check-ports _games-config _audio-runtime audio-up audio-down audio-status config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
 
 # The table keeps the file order of the targets inside each section. A `# ---`
 # line between blocks starts a new group, which the table separates with a blank
@@ -168,7 +170,7 @@ volumes: ## [global] List the Vulcan volumes
 	done
 
 # ---
-build: _check-presets _games-config base ## [presets] Build the container image
+build: _check-presets _games-config _audio-runtime base ## [presets] Build the container image
 ifeq ($(P_COUNT),1)
 	$(COMPOSE) build
 else
@@ -180,7 +182,7 @@ endif
 
 rebuild: build _recreate ## [presets] Rebuild the image and recreate the container
 
-_recreate: _check-presets _games-config
+_recreate: _check-presets _games-config _audio-runtime
 ifeq ($(P_COUNT),1)
 	$(COMPOSE) up -d --force-recreate
 else
@@ -190,7 +192,7 @@ else
 	done
 endif
 
-up: _check-presets _check-ports _games-config ## [presets] Start the container in the background
+up: _check-presets _check-ports _games-config _audio-runtime ## [presets] Start the container in the background
 ifeq ($(P_COUNT),1)
 	$(COMPOSE) up -d
 else
@@ -210,7 +212,7 @@ else
 	done
 endif
 
-stop: _check-presets _games-config ## [presets] Stop the running container
+stop: _check-presets _games-config _audio-teardown ## [presets] Stop the running container
 ifeq ($(P_COUNT),1)
 	$(COMPOSE) stop
 else
@@ -220,7 +222,7 @@ else
 	done
 endif
 
-down: _check-presets _games-config ## [presets] Stop and remove the container; keep named volumes
+down: _check-presets _games-config _audio-teardown ## [presets] Stop and remove the container; keep named volumes
 ifeq ($(P_COUNT),1)
 	$(COMPOSE) down
 else
@@ -293,7 +295,7 @@ shell: ## [preset] Open a shell with the running session environment
 		-e WAYLAND_DISPLAY="$${WAYLAND_SOCKET##*/}" \
 		$(CONTAINER) bash
 
-config: _check-presets _games-config ## [preset] Validate and print the resolved compose config
+config: _check-presets _games-config _audio-runtime ## [preset] Validate and print the resolved compose config
 	$(COMPOSE) config
 
 # ---
@@ -324,10 +326,12 @@ _clean-session: _check-presets _games-config
 	$(COMPOSE) up -d
 
 # ---
-uninstall: _check-presets _games-config ## [presets] Remove the container, its data, and the image
+uninstall: _check-presets _games-config _audio-teardown ## [presets] Remove the container, its data, and the image
 	@test "$(CONFIRM)" = "1" || { printf '%s\n' 'Refusing uninstall: run make uninstall CONFIRM=1'; exit 1; }
 ifeq ($(P_COUNT),1)
 	$(COMPOSE) down -v
+	@rm -rf "$(AUDIO_RUNTIME_DIR)/pulse" "$(AUDIO_RUNTIME_DIR)/obs-audio.err"
+	@rmdir "$(AUDIO_RUNTIME_DIR)" 2>/dev/null || true
 	@if docker image inspect $(IMAGE) >/dev/null 2>&1; then \
 		docker rmi $(IMAGE) 2>/dev/null || \
 			printf '[vulcan] image %s is still used by another container; leaving it\n' '$(IMAGE)' >&2; \
@@ -368,6 +372,29 @@ _check-presets:
 _games-config:
 ifeq ($(P_COUNT),1)
 	@YQ="$(YQ)" scripts/generate-games-config.sh "$(GAMES_CATALOG)" "$(GAMES_OUTPUT_DIR)"
+else
+	@:
+endif
+
+_audio-runtime:
+ifeq ($(P_COUNT),1)
+	@if [ -d "$(AUDIO_RUNTIME_DIR)" ]; then 		test -w "$(AUDIO_RUNTIME_DIR)" || { 			printf 'audio runtime is not writable: %s\n' "$(AUDIO_RUNTIME_DIR)" >&2; 			exit 1; 		}; 	else 		install -d -m 0700 "$(AUDIO_RUNTIME_DIR)"; 	fi
+else
+	@:
+endif
+
+audio-up: _check-presets _audio-runtime ## [preset] Expose the session audio to host OBS
+	@AUDIO_LATENCY_MSEC="$(AUDIO_LATENCY_MSEC)" scripts/obs-audio.sh up "$(AUDIO_RUNTIME_DIR)" "$(SESSION_ID)"
+
+audio-down: _check-presets ## [preset] Remove the session audio tunnel
+	@scripts/obs-audio.sh down "$(AUDIO_RUNTIME_DIR)" "$(SESSION_ID)"
+
+audio-status: _check-presets ## [preset] Show the session audio tunnel
+	@scripts/obs-audio.sh status "$(AUDIO_RUNTIME_DIR)" "$(SESSION_ID)"
+
+_audio-teardown:
+ifeq ($(P_COUNT),1)
+	@scripts/obs-audio.sh down "$(AUDIO_RUNTIME_DIR)" "$(SESSION_ID)" || true
 else
 	@:
 endif

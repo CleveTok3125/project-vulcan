@@ -27,6 +27,9 @@ RENDER_NODE="${RENDER_NODE:?set RENDER_NODE in the env file}"
 GAME_UID="${GAME_UID:-1000}"
 GAME_GID="${GAME_GID:-1000}"
 export XDG_RUNTIME_DIR="/run/user/${GAME_UID}"
+export AUDIO_RUNTIME_DIR="/run/vulcan-audio"
+export PULSE_RUNTIME_PATH="${AUDIO_RUNTIME_DIR}/pulse"
+export PULSE_SERVER="unix:${PULSE_RUNTIME_PATH}/native"
 export XDG_CONFIG_HOME="/data/home/.config"
 export XDG_CACHE_HOME="/data/home/.cache"
 export XDG_DATA_HOME="/data/home/.local/share"
@@ -80,6 +83,9 @@ if ! as_game test -w /data; then
 fi
 as_game install -d -m 0755 \
     /data/apollo /data/apollo/credentials /data/home /data/log /data/prefix /data/overlay /data/run
+# The audio runtime is a host bind mount. The mount root is host-owned; root
+# creates the Pulse directory and hands it to the game user.
+install -d -m 0700 -o "$GAME_UID" -g "$GAME_GID" "$PULSE_RUNTIME_PATH"
 
 # A tmpfs mount gives the runtime directory the game user's ownership without
 # a chown; sockets only need to live as long as the container.
@@ -110,7 +116,6 @@ as_game dbus-daemon --session \
     --address="unix:path=${XDG_RUNTIME_DIR}/bus" \
     --fork --print-address=1 >/run/dbus-address
 export DBUS_SESSION_BUS_ADDRESS="$(cat /run/dbus-address)"
-export PULSE_SERVER="unix:${XDG_RUNTIME_DIR}/pulse/native"
 
 "${SETPRIV_CMD[@]}" env \
     DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \

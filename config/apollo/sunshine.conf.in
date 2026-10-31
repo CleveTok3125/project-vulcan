@@ -7,6 +7,7 @@ capture = wlr
 output_name = @OUTPUT@
 encoder = @ENCODER@
 adapter_name = @ADAPTER@
+audio_sink = sink-sunshine-stereo
 
 file_apps = /data/apollo/apps.json
 file_state = /data/apollo/sunshine_state.json

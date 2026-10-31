@@ -45,6 +45,7 @@ write_preset() {
     cat >"$path" <<EOF
 SESSION_ID=${session_id}
 GAMES_CATALOG=$workdir/games.yaml
+AUDIO_RUNTIME_DIR=$workdir/audio
 RENDER_NODE=/dev/dri/renderD128
 SPRITZ_DIR=$workdir/source
 APOLLO_PORT=${apollo_port}
