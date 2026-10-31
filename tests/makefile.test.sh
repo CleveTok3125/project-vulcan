@@ -79,6 +79,11 @@ out="$(run_make audio-up AUDIO_LATENCY_MSEC=30)"
 check_contains 'audio-up accepts a latency override' 'AUDIO_LATENCY_MSEC="30"' "$out"
 out="$(run_make audio-up AUDIO_SOURCE=custom.monitor)"
 check_contains 'audio-up accepts a source override' 'AUDIO_SOURCE="custom.monitor"' "$out"
+out="$(run_make audio-up AUDIO_MONITOR=1)"
+check_contains 'audio-up enables host monitoring' 'AUDIO_MONITOR="1"' "$out"
+out="$(run_make audio-up AUDIO_MONITOR=1 AUDIO_MONITOR_SINK=speakers AUDIO_MONITOR_LATENCY_MSEC=50)"
+check_contains 'audio-up passes the monitor sink' 'AUDIO_MONITOR_SINK="speakers"' "$out"
+check_contains 'audio-up passes the monitor latency' 'AUDIO_MONITOR_LATENCY_MSEC="50"' "$out"
 
 # Session teardown also unloads the host audio tunnel.
 out="$(run_make down)"

@@ -53,6 +53,8 @@ which is not available in this container.
 - [Display and game](#display-and-game)
   - [OBS capture](#obs-capture)
   - [OBS audio](#obs-audio)
+    - [Audio from Apollo stream](#audio-from-apollo-stream)
+    - [Audio without Apollo](#audio-without-apollo)
   - [Wine environment](#wine-environment)
   - [GPU path](#gpu-path)
 - [Read-only game directories](#read-only-game-directories)
@@ -486,14 +488,15 @@ by `obs-vkcapture`.
 
 ### OBS audio
 
-Apollo captures `sink-sunshine-stereo.monitor`. To expose the same source to
-host OBS, the session Pulse socket is mounted at a host runtime directory:
+The session Pulse socket is mounted at a host runtime directory:
 
 ```text
 /run/user/<uid>/vulcan/<session>/pulse/native
 ```
 
-Expose it with:
+`audio-up` loads a host `module-tunnel-source` named
+`vulcan-<session>-audio` from the selected container source. The tunnel and
+optional host loopback are managed with:
 
 ```bash
 make audio-up P=.env.multi
@@ -501,25 +504,63 @@ make audio-status P=.env.multi
 make audio-down P=.env.multi
 ```
 
-`audio-up` loads a host Pulse `module-tunnel-source` named
-`vulcan-<session>-audio`, pointing at `sink-sunshine-stereo.monitor`. The source
-exists only after the Apollo stream starts, so run `audio-up` after starting a
-stream. Add an Audio Input Capture source in OBS and select that name.
-`audio-status` prints the tunnel module state and the source state.
+`audio-status` prints the tunnel and monitor module state plus the source state.
+`audio-down` unloads both modules.
+
+#### Audio from Apollo stream
+
+Status: current mode.
+
+Apollo creates `sink-sunshine-stereo` when a stream starts and routes game
+audio to it. The default source follows that sink:
+
+```dotenv
+AUDIO_SOURCE=sink-sunshine-stereo.monitor
+AUDIO_MONITOR=1
+AUDIO_MONITOR_SINK=
+```
+
+Run `make audio-up` after starting the stream. The source exists only while
+the stream runs. Add an Audio Input Capture source in OBS and select
+`vulcan-<session>-audio`, or use `AUDIO_MONITOR=1` for host speakers.
+
+`AUDIO_MONITOR_SINK` empty uses the host default sink; list choices with
+`pactl list short sinks`. The loopback adds latency and is not synchronized
+with client video. Do not enable OBS monitoring for the same source at the
+same time.
+
+#### Audio without Apollo
+
+Status: tunnel supported; direct game launch is not implemented.
+
+The container creates the stable `vulcan_game` null sink at startup. Its
+monitor exists without an Apollo stream:
+
+```dotenv
+AUDIO_SOURCE=vulcan_game.monitor
+AUDIO_MONITOR=1
+```
+
+`audio-up` can run before a game starts and stays silent until a producer
+writes to `vulcan_game`. Do not use this source for a game launched by Apollo:
+Apollo routes game audio to `sink-sunshine-stereo`, so this tunnel remains
+silent. The future direct launcher must set `PULSE_SINK=vulcan_game`; that
+launcher is not implemented.
 
 `AUDIO_RUNTIME_DIR` defaults to
 `/run/user/<uid>/vulcan/<SESSION_ID>`; set it in the preset to override.
 `AUDIO_SOURCE` overrides the tunnel source; the default is
 `sink-sunshine-stereo.monitor`. `AUDIO_LATENCY_MSEC` controls the fixed tunnel
-buffer; the default is `60`. Lower values reduce delay, higher values are
+buffer; the default is `60`. `AUDIO_MONITOR_LATENCY_MSEC` controls the loopback
+buffer; the default is `100`. Lower values reduce delay, higher values are
 safer.
 
-This is opt-in: `make up` does not load the tunnel. The host needs PipeWire or
-PulseAudio with `pactl` and module loading available; the game keeps running if
-audio export fails. Keep OBS audio monitoring off unless host playback is
-wanted. `make stop`, `make down`, and `make uninstall` unload the tunnel;
-`uninstall` also removes the session audio runtime. Use `audio-down` for a
-manual unload.
+This is opt-in: `make up` does not load the tunnel or monitor. The host needs
+PipeWire or PulseAudio with `pactl` and module loading available; the game keeps
+running if audio export fails. Use `make audio-up P=.env.multi AUDIO_MONITOR=1`
+or set `AUDIO_MONITOR=1` in the preset. `make stop`, `make down`, and
+`make uninstall` unload both modules; `uninstall` also removes the session audio
+runtime. Use `audio-down` for a manual unload.
 
 ### Wine environment
 
@@ -771,7 +812,8 @@ Additional hardening:
 - Multi-touch does not reach the game: gamescope 3.17 has no EIS touch
   capability.
 - OBS audio is an opt-in host tunnel. The source exists only while the Apollo
-  stream runs; A/V sync and speaker output stay on the host.
+  stream runs; `AUDIO_MONITOR=1` adds a host loopback with its own latency and
+  no synchronization with client video.
 - `make stats` reports GPU usage only on NVIDIA.
 
 ## Validation checklist
@@ -785,10 +827,25 @@ vulkaninfo --summary
 ffmpeg -hide_banner -encoders | grep -E 'nvenc|vaapi'
 ```
 
-If OBS audio is in use, start a stream, then run on the host:
+With an Apollo stream, run on the host:
 
 ```bash
 make audio-up P=.env.multi
+make audio-status P=.env.multi
+```
+
+For host speaker monitoring, run:
+
+```bash
+make audio-up P=.env.multi AUDIO_MONITOR=1
+make audio-status P=.env.multi
+pactl list short modules | grep loopback
+```
+
+Without Apollo, only the tunnel can be prepared:
+
+```bash
+make audio-up P=.env.multi AUDIO_SOURCE=vulcan_game.monitor
 make audio-status P=.env.multi
 ```
 
@@ -799,6 +856,10 @@ Expected:
 - `nvenc` or `vaapi` appears in the encoder list
 - when OBS audio is enabled, `audio-status` shows a live module and source
 - when host audio is active, OBS lists `vulcan-multi-audio`
+- when host monitoring is active, `audio-status` shows `monitor=<id>` and
+  `monitor_sink=<sink>`, and `pactl` lists a `module-loopback`
+- with `AUDIO_SOURCE=vulcan_game.monitor`, the source exists before a stream
+  and carries audio when the game or a test player writes to `vulcan_game`
 - when OBS capture is active, the source name is `<SESSION_ID>-<GAME_ID>`
 - Apollo logs show `Screencasting with Wayland's protocol`
 - host session remains usable while streaming

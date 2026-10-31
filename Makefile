@@ -41,6 +41,9 @@ OBS_VKCAPTURE_REF ?= v1.5.6
 GAMES_CATALOG ?= games.yaml
 AUDIO_RUNTIME_DIR ?= $(if $(XDG_RUNTIME_DIR),$(XDG_RUNTIME_DIR),/run/user/$(shell id -u))/vulcan/$(SESSION_ID)
 AUDIO_LATENCY_MSEC ?= 60
+AUDIO_MONITOR ?= 0
+AUDIO_MONITOR_SINK ?=
+AUDIO_MONITOR_LATENCY_MSEC ?= 100
 YQ ?= yq
 GAMES_OUTPUT_DIR := .generated
 GAMES_COMPOSE := $(GAMES_OUTPUT_DIR)/compose.games.yaml
@@ -332,7 +335,7 @@ uninstall: _check-presets _games-config _audio-teardown ## [presets] Remove the 
 	@test "$(CONFIRM)" = "1" || { printf '%s\n' 'Refusing uninstall: run make uninstall CONFIRM=1'; exit 1; }
 ifeq ($(P_COUNT),1)
 	$(COMPOSE) down -v
-	@rm -rf "$(AUDIO_RUNTIME_DIR)/pulse" "$(AUDIO_RUNTIME_DIR)/obs-audio.err"
+	@rm -rf "$(AUDIO_RUNTIME_DIR)/pulse" "$(AUDIO_RUNTIME_DIR)"/obs-audio*
 	@rmdir "$(AUDIO_RUNTIME_DIR)" 2>/dev/null || true
 	@if docker image inspect $(IMAGE) >/dev/null 2>&1; then \
 		docker rmi $(IMAGE) 2>/dev/null || \
@@ -385,8 +388,13 @@ else
 	@:
 endif
 
-audio-up: _check-presets _audio-runtime ## [preset] Expose the session audio to host OBS
-	@AUDIO_SOURCE="$(AUDIO_SOURCE)" AUDIO_LATENCY_MSEC="$(AUDIO_LATENCY_MSEC)" scripts/obs-audio.sh up "$(AUDIO_RUNTIME_DIR)" "$(SESSION_ID)"
+audio-up: _check-presets _audio-runtime ## [preset] Expose session audio to OBS or host speakers
+	@AUDIO_SOURCE="$(AUDIO_SOURCE)" \
+		AUDIO_LATENCY_MSEC="$(AUDIO_LATENCY_MSEC)" \
+		AUDIO_MONITOR="$(AUDIO_MONITOR)" \
+		AUDIO_MONITOR_SINK="$(AUDIO_MONITOR_SINK)" \
+		AUDIO_MONITOR_LATENCY_MSEC="$(AUDIO_MONITOR_LATENCY_MSEC)" \
+		scripts/obs-audio.sh up "$(AUDIO_RUNTIME_DIR)" "$(SESSION_ID)"
 
 audio-down: _check-presets ## [preset] Remove the session audio tunnel
 	@scripts/obs-audio.sh down "$(AUDIO_RUNTIME_DIR)" "$(SESSION_ID)"
