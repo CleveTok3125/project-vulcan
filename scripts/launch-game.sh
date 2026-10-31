@@ -123,6 +123,9 @@ runner=("$wine_bin" "$GAME_EXE")
 OBS_VKCAPTURE="${OBS_VKCAPTURE:-1}"
 OBS_GAMECAPTURE_BIN="${OBS_GAMECAPTURE_BIN:-/usr/bin/obs-gamecapture}"
 if [ "$OBS_VKCAPTURE" = "1" ]; then
+    # Multiple sessions may run the same executable. Give each session/game a
+    # distinct name so OBS can select the right client.
+    export OBS_VKCAPTURE_NAME="${OBS_VKCAPTURE_NAME:-${SESSION_ID:-vulcan}-${GAME_ID}}"
     if [ -x "$OBS_GAMECAPTURE_BIN" ]; then
         runner=("$OBS_GAMECAPTURE_BIN" "${runner[@]}")
     else

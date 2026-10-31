@@ -41,6 +41,7 @@ check_contains 'capture is enabled by default' 'OBS_VKCAPTURE: "${OBS_VKCAPTURE:
 check_contains 'image tag includes the capture ref' '$(OBS_VKCAPTURE_REF)' "$makefile"
 check_contains 'launcher defaults capture on' 'OBS_VKCAPTURE="${OBS_VKCAPTURE:-1}"' "$launcher"
 check_contains 'launcher wraps the wine runner' 'runner=("$OBS_GAMECAPTURE_BIN" "${runner[@]}")' "$launcher"
+check_contains 'capture name is session scoped' 'OBS_VKCAPTURE_NAME' "$launcher"
 
 if [ "$failures" -ne 0 ]; then
     printf '%s check(s) failed\n' "$failures" >&2

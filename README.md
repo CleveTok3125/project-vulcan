@@ -406,8 +406,12 @@ host:      OBS -> linux-vkcapture plugin -> DMA-BUF
 The container uses `network_mode: host`, so both sides share the abstract
 socket. This does not change the Sway/Apollo path.
 
-`OBS_VKCAPTURE=1` is the default. It wraps only the Wine command, inside
-gamescope, matching a Lutris `prefix_command = obs-gamecapture` setup:
+`OBS_VKCAPTURE=1` is the default. The capture source name defaults to
+`<SESSION_ID>-<GAME_ID>`, so two sessions running the same executable remain
+distinguishable. Set `OBS_VKCAPTURE_NAME` to override it.
+
+The wrapper covers only the Wine command, inside gamescope, matching a Lutris
+`prefix_command = obs-gamecapture` setup:
 
 ```text
 gamescope ... -- obs-gamecapture wine game

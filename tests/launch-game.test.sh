@@ -24,7 +24,7 @@ capture_log="$workdir/capture.log"
 
 cat >"$workdir/bin/obs-gamecapture" <<'EOF'
 #!/bin/sh
-printf 'gamecapture:%s\n' "$*" >>"${CAPTURE_LOG:?}"
+printf 'gamecapture:%s:%s\n' "${OBS_VKCAPTURE_NAME-}" "$*" >>"${CAPTURE_LOG:?}"
 exec "$@"
 EOF
 cat >"$workdir/bin/gamescope" <<'EOF'
@@ -87,6 +87,7 @@ run_launch() {
     local game_id="$1"
     shift
     env -i PATH="$workdir/bin:/usr/bin:/bin" HOME="$workdir/home" \
+        SESSION_ID=session-a \
         OBS_GAMECAPTURE_BIN="$workdir/bin/obs-gamecapture" \
         CAPTURE_LOG="$capture_log" \
         GAMES_CATALOG_PATH="$catalog" \
@@ -114,6 +115,14 @@ check 'wine environment defaults' 'yes' "$(grep -qx 'env:1:1:@im=none:1:' "$wine
 check 'game capture wrapper used' '1' "$(grep -c '^gamecapture:' "$capture_log")"
 check 'game capture wraps the wine loader' 'yes' \
     "$(grep -q "^gamecapture:.*${fake_root}/bin/wine64" "$capture_log" && printf yes || printf no)"
+check 'capture name is session scoped' 'session-a-test' \
+    "$(sed -n 's/^gamecapture:\([^:]*\):.*/\1/p' "$capture_log" | head -n 1)"
+
+# A custom capture name is preserved for clients that need it.
+: >"$capture_log"
+run_launch test OBS_VKCAPTURE_NAME=custom-name 2>"$workdir/custom-name.log"
+check 'custom capture name is preserved' 'custom-name' \
+    "$(sed -n 's/^gamecapture:\([^:]*\):.*/\1/p' "$capture_log" | head -n 1)"
 
 # The wrapper can be disabled for troubleshooting.
 : >"$capture_log"
