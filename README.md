@@ -13,17 +13,18 @@ is not used.
 Docker (rootful)
 └─ game container
    ├─ Sway HEADLESS-1 1920x1080@144
-   ├─ Apollo (capture=wlr, NVENC)
+   ├─ Apollo (capture=wlr, NVENC or VAAPI)
    │  └─ app per catalog game
    ├─ gamescope (nested Wayland client, optional)
    │  └─ wine + selected game
-   ├─ PipeWire null sink
+   ├─ PipeWire (Apollo audio sink)
    └─ vulcan-inputd (socket -> gamescope EIS)
 ```
 
 The container receives the render node named by `RENDER_NODE`. On NVIDIA it
-also receives the GPU's primary card node, which only the encoder opens, plus
-the NVIDIA device nodes; the other cards are not passed.
+also receives the primary card node configured in `compose.nvidia.yaml`, which
+only the encoder opens, plus the NVIDIA device nodes; the other cards are not
+passed.
 
 Sway is the capture surface: gamescope does not expose
 `zwlr_screencopy_manager_v1`, and Apollo on Linux does not currently provide a
@@ -32,6 +33,37 @@ client and owns the game session inside the container.
 
 Hyprland is not used because its Aquamarine backend requires an active seat/VT,
 which is not available in this container.
+
+## Contents
+
+- [Architecture](#architecture)
+- [Host prerequisites](#host-prerequisites)
+  - [Groups](#groups)
+- [Build cache](#build-cache)
+  - [Shared base image](#shared-base-image)
+- [Reproducible builds](#reproducible-builds)
+- [Configuration](#configuration)
+  - [Game catalog](#game-catalog)
+  - [Sessions](#sessions)
+  - [Migrating from per-game presets](#migrating-from-per-game-presets)
+  - [Ports](#ports)
+- [Fresh deployment](#fresh-deployment)
+  - [NVIDIA devices](#nvidia-devices)
+  - [AMD and Intel](#amd-and-intel)
+- [Display and game](#display-and-game)
+  - [OBS capture](#obs-capture)
+  - [OBS audio](#obs-audio)
+  - [Wine environment](#wine-environment)
+  - [GPU path](#gpu-path)
+- [Read-only game directories](#read-only-game-directories)
+- [Input](#input)
+  - [Cursor](#cursor)
+  - [Gamepad](#gamepad)
+  - [Multi-touch](#multi-touch)
+  - [Session isolation](#session-isolation)
+- [Security](#security)
+- [Limitations](#limitations)
+- [Validation checklist](#validation-checklist)
 
 ## Host prerequisites
 
@@ -44,13 +76,13 @@ which is not available in this container.
   catalog: `sudo pacman -S jq go-yq`.
 - Optional OBS capture: native OBS on Wayland plus `obs-vkcapture` matching
   `OBS_VKCAPTURE_REF`. The container does not ship OBS or the OBS plugin.
+- Optional OBS audio: PipeWire or PulseAudio on the host with `pactl` and
+  module loading available.
 - Spritz-Wine-TkG, a Proton tree, or a distribution Wine tree available on
   the host under `SPRITZ_DIR`; it is mounted read-only at
   `/data/spritz-wine-tkg`.
-- A writable Wine prefix per game under `/data/prefix/<game>`; the container
-  creates it on the first game launch.
-- `WINE_ROOT` points at a Wine tree with `bin/wine64` or, for Wine 11 and
-  later, `bin/wine`.
+- `WINE_ROOT` is the container path of that tree. It needs `bin/wine64` or,
+  for Wine 11 and later, `bin/wine`.
 
 ### Groups
 
@@ -72,22 +104,23 @@ packages once. Do not use `--no-cache` for normal rebuilds.
 `make base` builds `vulcan/base:<hash>` from `docker/base.Dockerfile`: the
 mirror setup, the runtime packages, the build tooling, and the game user. The
 game image starts from it and adds only the vendor packages, Apollo, the native
-and Rust artifacts, and the configuration.
+and Rust artifacts, the obs-vkcapture sender, and the configuration.
 
 The base tag hashes `docker/base.Dockerfile`, `docker/fetch-heavy`, and
 `MIRROR_COUNTRY`; the game tag hashes the base tag, `GPU_VENDOR`, `APOLLO_PKG`,
-and `APOLLO_COMMIT`. Editing scripts or config rebuilds the last layers only,
-an Apollo bump rebuilds the Apollo stage only, and a package change rebuilds
-the base and everything above it. `uninstall` removes the game image once no
-container uses it.
+`APOLLO_COMMIT`, and `OBS_VKCAPTURE_REF`. Editing scripts or config rebuilds
+the last layers only, an Apollo bump rebuilds the Apollo stage only, and a
+package change rebuilds the base and everything above it. `uninstall` removes
+the game image once no container uses it.
 
 `docker/fetch-heavy` prefetches the large build packages into the pacman cache
 with aria2c. Everything else, including repository databases and parallel
 downloads, uses pacman's default downloader.
 
-Calling Compose without `make` needs the base image first and the generated
-catalog files: run `make base`, `make config`, then pass
-`-f .generated/compose.games.yaml` explicitly.
+Calling Compose without `make` needs the base image first, the generated catalog
+files, and the `BASE_IMAGE` and `IMAGE_TAG` values that `make` exports. Run
+`make base` and `make config`, then pass `-f .generated/compose.games.yaml`
+explicitly.
 
 `make rm-base` removes the base image; the next build recreates it.
 `make images` lists the Vulcan images, and `make base-rebuild CONFIRM=1`
@@ -131,7 +164,8 @@ Both local files are ignored by git. `make` converts `games.yaml` to
 `.generated/games.json` and `.generated/compose.games.yaml`; Compose mounts the
 generated JSON and one read-only bind for every catalog game.
 
-`SESSION_ID`, `GAMES_CATALOG`, `RENDER_NODE`, and `SPRITZ_DIR` are required.
+`SESSION_ID`, `RENDER_NODE`, and `SPRITZ_DIR` are required. `GAMES_CATALOG`
+defaults to `games.yaml`; `GID_RENDER` and `GID_VIDEO` are required by Compose.
 `SESSION_ID` names the compose project, container `vulcan-<SESSION_ID>`, volume
 `vulcan_<SESSION_ID>-data`, and the default Apollo host name
 `Vulcan-<SESSION_ID>`.
@@ -171,6 +205,9 @@ games:
   session `SPRITZ_DIR`. Without it, every game uses the session Wine tree.
 - `uuid` is optional. Empty derives a stable UUID from `id`; set it to keep an
   existing client app identity.
+
+The container creates one Wine prefix per game under `/data/prefix/<id>` on
+the first launch.
 
 Apollo reads one app per catalog entry from `/data/apollo/apps.json`. Selecting
 an app starts `launch-game.sh <id>`, which resolves that game's overlay, Wine
@@ -243,26 +280,26 @@ ports from that value:
 | Protocol | Ports |
 | --- | --- |
 | TCP | `base - 5`, `base`, `base + 1`, `base + 21` |
-| UDP | `base + 9` through `base + 13` |
+| UDP | `base + 9`, `base + 10`, `base + 11`, `base + 13` |
 
 Pick bases whose ranges do not intersect on the same protocol. The tracked
-example uses `48006`; a second session on `47989` does not overlap it. Run
+example uses `48006`; a second session on `48040` does not overlap it. Run
 `make check-ports P=".env.multi:.env.other"` before starting a set; `up` and
 `restart` run the same check. `make ports P=".env.multi:.env.other"` prints the
 derived table for those presets. Clients that only use the default port cannot
 reach a preset with a custom base port.
 
-Both sessions share one GPU, so VRAM, memory bandwidth, and the driver's NVENC
-session limit apply to the sum of the streams. The image and the NVIDIA device
-configuration are shared. `make uninstall` removes the container and volume of
-one preset and leaves the image while another preset still uses it;
+Both sessions share one GPU, so VRAM and memory bandwidth apply to the sum of
+the streams. On NVIDIA, the NVENC session limit and device configuration also
+apply. `make uninstall` removes the container and volume of one preset and
+leaves the image while another preset still uses it;
 `make uninstall P="a:b"` removes the image once the last container is gone.
 
 ## Fresh deployment
 
 These steps start from a checkout with no image, volume, or local preset.
-The `make` targets pass `compose.nvidia.yaml`; on AMD/Intel hosts open a shell
-that does not use that file and pass the generated override explicitly.
+The `make` targets add `compose.nvidia.yaml` only when `GPU_VENDOR=nvidia`;
+AMD/Intel presets use the same targets without it.
 
 1. Read the render node group:
 
@@ -271,8 +308,8 @@ that does not use that file and pass the generated override explicitly.
    ```
 
    The value is `GID_RENDER`. `GID_VIDEO` is the numeric video group from
-   `getent group video`; compose requires it. A node owned by group `0`
-   cannot be read by the game user.
+   `getent group video`; compose requires it. A node in group `0` is not added
+   to the game user's groups, so make sure that the node is readable.
 
 2. Choose the render node of the encoder GPU. The node numbering does not
    follow the card numbering, and a node from the wrong vendor leaves Apollo
@@ -296,10 +333,10 @@ that does not use that file and pass the generated override explicitly.
    make config
    ```
 
-   `SESSION_ID`, `GAMES_CATALOG`, `SPRITZ_DIR`, `RENDER_NODE`, and the GIDs are
-   required. The catalog needs at least one game with a valid `source` and
-   `exe`. `make config` prints the resolved Compose configuration and stops at
-   a missing or malformed value.
+   `SESSION_ID`, `SPRITZ_DIR`, `RENDER_NODE`, and the GIDs are required;
+   `GAMES_CATALOG` defaults to `games.yaml`. The catalog needs at least one
+   game with a valid `source` and `exe`. `make config` prints the resolved
+   Compose configuration and stops at a missing or malformed value.
 
 4. Build the image for the selected preset:
 
@@ -308,7 +345,8 @@ that does not use that file and pass the generated override explicitly.
    ```
 
    The tag follows the build inputs, so one build serves every preset with the
-   same base image, `GPU_VENDOR`, `APOLLO_PKG`, and `APOLLO_COMMIT`.
+   same base image, `GPU_VENDOR`, `APOLLO_PKG`, `APOLLO_COMMIT`, and
+   `OBS_VKCAPTURE_REF`.
 
 5. Start the container:
 
@@ -333,7 +371,7 @@ that does not use that file and pass the generated override explicitly.
 7. Verify the GPU nodes and the session logs:
 
    ```bash
-   make stats
+   make stats  # NVIDIA only; see AMD and Intel
    docker compose --env-file .env.local exec game ls -l /dev/dri
    docker compose --env-file .env.local exec game tail -f /data/log/sway.log
    ```
@@ -383,11 +421,14 @@ APOLLO_ENCODER=vaapi
 APOLLO_ADAPTER=/dev/dri/renderD128
 ```
 
+`make stats` reads `nvidia-smi`; on AMD/Intel, use `docker stats` for CPU and
+memory.
+
 ## Display and game
 
 Defaults:
 
-- Sway: `HEADLESS-1`, `1920x1080@144`.
+- Sway: `HEADLESS-1`, `1920x1080@144`; `APOLLO_OUTPUT` must name this output.
 - gamescope: `--backend wayland`, fullscreen, 1920x1080@144.
 - Game executable: the catalog `exe` for the selected Apollo app, under
   `/games/<id>`.
@@ -396,6 +437,10 @@ Defaults:
 - Audio: Apollo creates its `sink-sunshine-stereo` virtual sink and captures
   that monitor (`audio_sink = sink-sunshine-stereo`). Game audio is routed to
   that sink while streaming.
+
+Set `APOLLO_NAME` to override the host name (`Vulcan-<SESSION_ID>` by
+default). `GAMESCOPE_RT=1` passes `--rt` to gamescope;
+`GAMESCOPE_FORCE_WINDOWS_FULLSCREEN=0` disables its fullscreen flag.
 
 ### OBS capture
 
@@ -427,7 +472,8 @@ stop the game.
 Host requirements:
 
 - Native OBS on Wayland, not Flatpak.
-- `obs-vkcapture` plugin, version matching `OBS_VKCAPTURE_REF` (source tag; host package `1.5.6` uses tag `v1.5.6`).
+- `obs-vkcapture` plugin, version matching `OBS_VKCAPTURE_REF` (source tag;
+  host package `1.5.6` uses tag `v1.5.6`).
 - NVIDIA driver with `nvidia-drm.modeset=1`.
 
 The container builds only the capture layer (`-DBUILD_PLUGIN=OFF`) and pins the
@@ -455,22 +501,25 @@ make audio-status P=.env.multi
 make audio-down P=.env.multi
 ```
 
-`AUDIO_LATENCY_MSEC` controls the fixed tunnel buffer; the default is `60`.
-Lower values reduce delay, higher values are safer.
-
 `audio-up` loads a host Pulse `module-tunnel-source` named
 `vulcan-<session>-audio`, pointing at `sink-sunshine-stereo.monitor`. The source
 exists only after the Apollo stream starts, so run `audio-up` after starting a
-stream. Add a PulseAudio source in OBS and select that name.
-
-This is opt-in: `make up` does not load the tunnel. The host needs PipeWire or
-PulseAudio with module loading available; the game keeps running if audio
-export fails. Keep OBS audio monitoring off unless host playback is wanted.
-`make stop`, `make down`, and `make uninstall` unload the tunnel; `uninstall`
-also removes the session audio runtime. Use `audio-down` for a manual unload.
+stream. Add an Audio Input Capture source in OBS and select that name.
+`audio-status` prints the tunnel module state and the source state.
 
 `AUDIO_RUNTIME_DIR` defaults to
 `/run/user/<uid>/vulcan/<SESSION_ID>`; set it in the preset to override.
+`AUDIO_SOURCE` overrides the tunnel source; the default is
+`sink-sunshine-stereo.monitor`. `AUDIO_LATENCY_MSEC` controls the fixed tunnel
+buffer; the default is `60`. Lower values reduce delay, higher values are
+safer.
+
+This is opt-in: `make up` does not load the tunnel. The host needs PipeWire or
+PulseAudio with `pactl` and module loading available; the game keeps running if
+audio export fails. Keep OBS audio monitoring off unless host playback is
+wanted. `make stop`, `make down`, and `make uninstall` unload the tunnel;
+`uninstall` also removes the session audio runtime. Use `audio-down` for a
+manual unload.
 
 ### Wine environment
 
@@ -485,6 +534,9 @@ selected env file:
   leak into the container.
 - `__GL_SHADER_DISK_CACHE_SKIP_CLEANUP=1` keeps the NVIDIA GL shader cache
   instead of letting the driver prune it.
+- `D3D_BACKEND=dxvk` uses the DXVK DLLs; `wined3d` uses Wine's OpenGL path.
+- `DXVK_HOST_DIR` is the host DXVK directory mounted at `/data/dxvk`;
+  `DXVK_DIR` overrides the container path.
 - `DXVK_HUD` is empty by default; set it to e.g. `fps,frametimes` to show the
   DXVK overlay.
 
@@ -493,8 +545,9 @@ selected env file:
 The container receives the render node named by `RENDER_NODE`. On NVIDIA,
 `compose.nvidia.yaml` also passes the primary card node and the NVIDIA device
 nodes; AMD/Intel need only the render node. A host iGPU is not passed through.
-`RENDER_NODE` must be the render node of the GPU that runs gamescope and the
-encoder; see [Fresh deployment](#fresh-deployment).
+`NVIDIA_VISIBLE_DEVICES` selects the NVIDIA driver index. `RENDER_NODE` must be
+the render node of the GPU that runs gamescope and the encoder; see
+[Fresh deployment](#fresh-deployment).
 
 Every streamed frame goes through two composition steps:
 
@@ -550,11 +603,11 @@ override adds one bind mount per game; there is no shared game root.
 
 A host game directory can also contain state written outside the container,
 including stored logins under `Data/Login` and cached credentials under
-`Data/Cache`. Because it is the lower layer, a
-fresh volume still starts signed in. The catalog `reset_paths` field lists
-game-relative paths to remove once per Wine prefix; removals land in the
-overlay upper layer and the host files stay untouched. Changing the field on
-an existing prefix applies at the next launch.
+`Data/Cache`. Because it is the lower layer, a fresh volume still starts
+signed in. The catalog `reset_paths` field lists game-relative paths to remove
+once per Wine prefix; removals land in the overlay upper layer and the host
+files stay untouched. A changed field takes effect on a fresh prefix, or after
+`make clean-overlay` clears the marker.
 
 The session data volume contains one prefix and one overlay per game:
 
@@ -665,8 +718,8 @@ events.
 Logs:
 
 ```bash
-docker compose exec game tail -f /data/log/sway.log
-docker compose exec game tail -f /data/log/vulcan-inputd.log
+docker compose --env-file .env.local exec game tail -f /data/log/sway.log
+docker compose --env-file .env.local exec game tail -f /data/log/vulcan-inputd.log
 ```
 
 ### Session isolation
@@ -717,20 +770,35 @@ Additional hardening:
   profile.
 - Multi-touch does not reach the game: gamescope 3.17 has no EIS touch
   capability.
+- OBS audio is an opt-in host tunnel. The source exists only while the Apollo
+  stream runs; A/V sync and speaker output stay on the host.
+- `make stats` reports GPU usage only on NVIDIA.
 
 ## Validation checklist
 
+Enter the running session with `make shell P=.env.multi`, then run:
+
 ```bash
-# inside container
 ls -l /dev/dri
 swaymsg -t get_outputs
 vulkaninfo --summary
-ffmpeg -hide_banner -encoders | grep nvenc
+ffmpeg -hide_banner -encoders | grep -E 'nvenc|vaapi'
+```
+
+If OBS audio is in use, start a stream, then run on the host:
+
+```bash
+make audio-up P=.env.multi
+make audio-status P=.env.multi
 ```
 
 Expected:
 
 - `HEADLESS-1` at 1920x1080@144
 - `RENDER_NODE` and, on NVIDIA, the primary card node
+- `nvenc` or `vaapi` appears in the encoder list
+- when OBS audio is enabled, `audio-status` shows a live module and source
+- when host audio is active, OBS lists `vulcan-multi-audio`
+- when OBS capture is active, the source name is `<SESSION_ID>-<GAME_ID>`
 - Apollo logs show `Screencasting with Wayland's protocol`
 - host session remains usable while streaming
