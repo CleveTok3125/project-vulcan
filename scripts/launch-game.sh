@@ -117,6 +117,20 @@ fi
 
 runner=("$wine_bin" "$GAME_EXE")
 
+# Mirror the Lutris prefix command: keep the capture layer inside gamescope
+# and wrap only the Wine process. OBS is an optional receiver; a missing
+# wrapper must not stop the game.
+OBS_VKCAPTURE="${OBS_VKCAPTURE:-1}"
+OBS_GAMECAPTURE_BIN="${OBS_GAMECAPTURE_BIN:-/usr/bin/obs-gamecapture}"
+if [ "$OBS_VKCAPTURE" = "1" ]; then
+    if [ -x "$OBS_GAMECAPTURE_BIN" ]; then
+        runner=("$OBS_GAMECAPTURE_BIN" "${runner[@]}")
+    else
+        printf '[vulcan] obs-gamecapture not found: %s; OBS capture disabled\n' \
+            "$OBS_GAMECAPTURE_BIN" >&2
+    fi
+fi
+
 # The prefix lives in the container volume. A fresh volume starts empty, so
 # create the default Wine prefix here instead of shipping one in the image.
 if [ ! -d "$WINEPREFIX/drive_c/windows/system32" ]; then

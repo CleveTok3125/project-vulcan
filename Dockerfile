@@ -68,6 +68,23 @@ RUN --mount=type=cache,target=/root/.cargo/registry,sharing=locked \
     --mount=type=cache,target=/root/.cargo/git,sharing=locked \
     cargo build --release --locked
 
+FROM ${BASE_IMAGE} AS vkcapture-builder
+
+# Build only the capture sender. The OBS plugin belongs to the host OBS
+# process; pulling obs-studio into the game image would be unnecessary.
+ARG OBS_VKCAPTURE_REF=v1.5.6
+
+RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
+    pacman -S --noconfirm --needed --disable-download-timeout cmake vulkan-headers \
+    && git clone https://github.com/nowrep/obs-vkcapture /src/obs-vkcapture \
+    && git -C /src/obs-vkcapture checkout "$OBS_VKCAPTURE_REF" \
+    && cmake -S /src/obs-vkcapture -B /src/obs-vkcapture/build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_PLUGIN=OFF \
+        -DCMAKE_INSTALL_PREFIX=/usr \
+    && cmake --build /src/obs-vkcapture/build -j"$(nproc)" \
+    && DESTDIR=/out cmake --install /src/obs-vkcapture/build
+
 FROM game-base
 
 COPY --from=apollo-builder /home/builder/apollo-git/*.pkg.tar.zst /tmp/apollo/
@@ -78,6 +95,8 @@ COPY --from=native-builder /out/libglycin-nosandbox.so /usr/lib/libglycin-nosand
 
 COPY --from=rust-builder /build/target/release/libvulcan_uinput_shim.so /usr/lib/libvulcan_uinput_shim.so
 COPY --from=rust-builder /build/target/release/vulcan-inputd /usr/local/bin/vulcan-inputd
+
+COPY --from=vkcapture-builder /out/usr/ /usr/
 
 RUN mkdir -p /config/apollo /data /games /games-ro \
     && chown -R 1000:1000 /data /games

@@ -18,7 +18,25 @@ check() {
 }
 
 fake_root="$workdir/wine"
-mkdir -p "$fake_root/bin" "$workdir/games/test" "$workdir/games/other" "$workdir/home" "$workdir/wine-mount/other/bin"
+mkdir -p "$fake_root/bin" "$workdir/bin" "$workdir/games/test" "$workdir/games/other" "$workdir/home" "$workdir/wine-mount/other/bin"
+capture_log="$workdir/capture.log"
+: >"$capture_log"
+
+cat >"$workdir/bin/obs-gamecapture" <<'EOF'
+#!/bin/sh
+printf 'gamecapture:%s\n' "$*" >>"${CAPTURE_LOG:?}"
+exec "$@"
+EOF
+cat >"$workdir/bin/gamescope" <<'EOF'
+#!/bin/sh
+printf 'gamescope:%s\n' "$*" >>"${CAPTURE_LOG:?}"
+while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do
+    shift
+done
+[ "$#" -gt 0 ] && shift
+exec "$@"
+EOF
+chmod 0755 "$workdir/bin/obs-gamecapture" "$workdir/bin/gamescope"
 game_exe="$workdir/games/test/Game.exe"
 other_exe="$workdir/games/other/Other.exe"
 wine_log="$workdir/wine.log"
@@ -68,7 +86,9 @@ EOF
 run_launch() {
     local game_id="$1"
     shift
-    env -i PATH=/usr/bin:/bin HOME="$workdir/home" \
+    env -i PATH="$workdir/bin:/usr/bin:/bin" HOME="$workdir/home" \
+        OBS_GAMECAPTURE_BIN="$workdir/bin/obs-gamecapture" \
+        CAPTURE_LOG="$capture_log" \
         GAMES_CATALOG_PATH="$catalog" \
         GAMES_MOUNT="$workdir/games" \
         WINE_MOUNT="$workdir/wine-mount" \
@@ -89,6 +109,29 @@ check 'prefix is scoped by game' 'yes' \
     "$([ -d "$workdir/prefix/test/drive_c/windows/system32" ] && printf yes || printf no)"
 check 'game starts after init' '1' "$(grep -cx -- "$game_exe" "$wine_log")"
 check 'wine environment defaults' 'yes' "$(grep -qx 'env:1:1:@im=none:1:' "$wine_log" && printf yes || printf no)"
+
+# The default wraps only the Wine command, just like the Lutris prefix command.
+check 'game capture wrapper used' '1' "$(grep -c '^gamecapture:' "$capture_log")"
+check 'game capture wraps the wine loader' 'yes' \
+    "$(grep -q "^gamecapture:.*${fake_root}/bin/wine64" "$capture_log" && printf yes || printf no)"
+
+# The wrapper can be disabled for troubleshooting.
+: >"$capture_log"
+run_launch test OBS_VKCAPTURE=0 2>"$workdir/no-capture.log"
+check 'game capture can be disabled' '0' "$(grep -c '^gamecapture:' "$capture_log")"
+
+# With gamescope, the wrapper stays inside the gamescope command line.
+: >"$capture_log"
+run_launch test GAMESCOPE_ENABLED=1 2>"$workdir/gamescope.log"
+check 'gamescope is outer command' 'gamescope:' "$(head -n 1 "$capture_log" | cut -d: -f1):"
+check 'game capture is inside gamescope' 'gamecapture:' "$(sed -n '2p' "$capture_log" | cut -d: -f1):"
+
+# A missing wrapper must not prevent the game from starting.
+: >"$capture_log"
+run_launch test OBS_GAMECAPTURE_BIN="$workdir/missing-obs-gamecapture" 2>"$workdir/no-wrapper.log"
+check 'missing wrapper is reported' '1' "$(grep -c 'obs-gamecapture not found' "$workdir/no-wrapper.log")"
+check 'missing wrapper still starts the game' 'yes' \
+    "$([ "$(grep -cx -- "$game_exe" "$wine_log")" -gt 0 ] && printf yes || printf no)"
 
 # Second launch reuses the prefix.
 : >"$wine_log"

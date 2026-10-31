@@ -42,6 +42,8 @@ which is not available in this container.
 - Game files available under host directories that can be mounted read-only.
 - `jq` and `yq` (`go-yq`) on the host to validate and convert the game
   catalog: `sudo pacman -S jq go-yq`.
+- Optional OBS capture: native OBS on Wayland plus `obs-vkcapture` matching
+  `OBS_VKCAPTURE_REF`. The container does not ship OBS or the OBS plugin.
 - Spritz-Wine-TkG, a Proton tree, or a distribution Wine tree available on
   the host under `SPRITZ_DIR`; it is mounted read-only at
   `/data/spritz-wine-tkg`.
@@ -101,7 +103,7 @@ The build pins its external inputs:
 - Rust crates are pinned by `rust/Cargo.lock` and built with `--locked`.
 
 The image tag follows the build inputs: the base tag, `GPU_VENDOR`,
-`APOLLO_PKG`, and `APOLLO_COMMIT` are hashed into
+`APOLLO_PKG`, `APOLLO_COMMIT`, and `OBS_VKCAPTURE_REF` are hashed into
 `vulcan/game-stream:local-<hash>`. Presets with the same inputs share one
 image; a preset that changes them builds its own tag instead of overwriting
 the image another preset runs on. `up` never pulls, so it stops with an error
@@ -390,6 +392,43 @@ Defaults:
   `/games/<id>`.
 - Wine: `/data/spritz-wine-tkg/bin/wine64` or `/data/spritz-wine-tkg/bin/wine`,
   with `UMU_USE_STEAM=1`.
+
+### OBS capture
+
+The image contains only the `obs-vkcapture` capture sender. Host OBS runs the
+receiver plugin:
+
+```text
+container: Wine/game -> obs-vkcapture layer -> abstract socket
+host:      OBS -> linux-vkcapture plugin -> DMA-BUF
+```
+
+The container uses `network_mode: host`, so both sides share the abstract
+socket. This does not change the Sway/Apollo path.
+
+`OBS_VKCAPTURE=1` is the default. It wraps only the Wine command, inside
+gamescope, matching a Lutris `prefix_command = obs-gamecapture` setup:
+
+```text
+gamescope ... -- obs-gamecapture wine game
+```
+
+Set `OBS_VKCAPTURE=0` to disable capture. A missing host OBS or plugin does not
+stop the game.
+
+Host requirements:
+
+- Native OBS on Wayland, not Flatpak.
+- `obs-vkcapture` plugin, version matching `OBS_VKCAPTURE_REF` (source tag; host package `1.5.6` uses tag `v1.5.6`).
+- NVIDIA driver with `nvidia-drm.modeset=1`.
+
+The container builds only the capture layer (`-DBUILD_PLUGIN=OFF`) and pins the
+source with `OBS_VKCAPTURE_REF`; there is no automatic host-version detection.
+Change the reference and rebuild when the host plugin changes.
+
+Capture is limited to the game process: it does not include gamescope cursor,
+FSR/NIS, HDR tone mapping, or gamescope/Steam overlays. Audio is not captured
+by `obs-vkcapture`.
 
 ### Wine environment
 

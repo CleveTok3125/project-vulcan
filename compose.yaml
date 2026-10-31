@@ -9,6 +9,7 @@ services:
         GPU_VENDOR: "${GPU_VENDOR:-nvidia}"
         APOLLO_PKG: "${APOLLO_PKG:-apollo-git}"
         APOLLO_COMMIT: "${APOLLO_COMMIT:-adc5c5a0bd80831ce495434bb16aee2cd4175fb8}"
+        OBS_VKCAPTURE_REF: "${OBS_VKCAPTURE_REF:-v1.5.6}"
     image: "vulcan/game-stream:${IMAGE_TAG:-local}"
     # Never pull: the tag is built locally for its build variant.
     pull_policy: never
@@ -90,6 +91,7 @@ services:
       WINEFSYNC: "${WINEFSYNC:-}"
       __GL_SHADER_DISK_CACHE_SKIP_CLEANUP: "${__GL_SHADER_DISK_CACHE_SKIP_CLEANUP:-}"
       DXVK_HUD: "${DXVK_HUD:-}"
+      OBS_VKCAPTURE: "${OBS_VKCAPTURE:-1}"
 
       # NVIDIA device nodes are supplied by compose.nvidia.yaml.
       NVIDIA_VISIBLE_DEVICES: "${NVIDIA_VISIBLE_DEVICES:-0}"

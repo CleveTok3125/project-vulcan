@@ -299,6 +299,14 @@ else
     printf 'FAIL a different backend gets its own tag: both are [%s]\n' "$default_tag" >&2
     failures=$((failures + 1))
 fi
+ref_tag="$(tag_for "$(run_make uninstall CONFIRM=1 OBS_VKCAPTURE_REF=1.5.7)")"
+if [ -n "$ref_tag" ] && [ "$default_tag" != "$ref_tag" ]; then
+    printf 'ok   a different obs-vkcapture ref gets its own tag\n'
+else
+    printf 'FAIL a different obs-vkcapture ref gets its own tag: [%s] vs [%s]\n' \
+        "$default_tag" "$ref_tag" >&2
+    failures=$((failures + 1))
+fi
 
 # Targets that do not use Compose must work before any configuration exists.
 rm "$workdir/.env.local"

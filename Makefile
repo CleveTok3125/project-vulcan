@@ -37,6 +37,7 @@ GPU_VENDOR ?= nvidia
 APOLLO_PKG ?= apollo-git
 APOLLO_COMMIT ?= adc5c5a0bd80831ce495434bb16aee2cd4175fb8
 MIRROR_COUNTRY ?=
+OBS_VKCAPTURE_REF ?= v1.5.6
 GAMES_CATALOG ?= games.yaml
 YQ ?= yq
 GAMES_OUTPUT_DIR := .generated
@@ -55,7 +56,7 @@ export BASE_IMAGE
 
 # One image per build variant, so a preset never overwrites the image another
 # preset runs on.
-IMAGE_TAG := local-$(shell printf '%s' '$(BASE_TAG)|$(GPU_VENDOR)|$(APOLLO_PKG)|$(APOLLO_COMMIT)' | sha256sum | cut -c1-12)
+IMAGE_TAG := local-$(shell printf '%s' '$(BASE_TAG)|$(GPU_VENDOR)|$(APOLLO_PKG)|$(APOLLO_COMMIT)|$(OBS_VKCAPTURE_REF)' | sha256sum | cut -c1-12)
 IMAGE := vulcan/game-stream:$(IMAGE_TAG)
 export IMAGE_TAG
 
