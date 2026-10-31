@@ -41,7 +41,7 @@ without_gamescope="$(render "$(sway_xwayland 0)")"
 check_contains "xwayland is disabled under gamescope" "xwayland disable" "$with_gamescope"
 check_contains "xwayland is enabled without gamescope" "xwayland enable" "$without_gamescope"
 check_contains "the output keeps its mode" "resolution 1920x1080@144Hz" "$with_gamescope"
-check_contains "the background keeps swaybg" "swaybg_command" "$with_gamescope"
+check_missing "the config leaves the background to wbg" "swaybg_command" "$with_gamescope"
 check_missing "no mode placeholder remains" "@MODE@" "$with_gamescope"
 check_missing "no xwayland placeholder remains" "@XWAYLAND@" "$with_gamescope"
 

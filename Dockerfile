@@ -54,8 +54,32 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
     && x86_64-w64-mingw32-gcc -shared -O2 \
         -o /out/xinput1_4.dll \
         /src/xinput1_4.c /src/xinput1_4.def \
-        -Wl,--no-insert-timestamp \
-    && gcc -O2 -shared -fPIC -o /out/libglycin-nosandbox.so /src/glycin-nosandbox.c -ldl
+        -Wl,--no-insert-timestamp
+
+# wbg draws the wallpaper without gdk-pixbuf, so no image loader is spawned
+# through glycin and no bubblewrap sandbox is required at runtime.
+FROM ${BASE_IMAGE} AS wbg-builder
+
+ARG WBG_VERSION=1.3.0
+ARG WBG_SHA256=5e23555c599e58f8fc76f2f8a697149c9fe96702a337a3e0457d503becb307a5
+
+RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
+    pacman -S --noconfirm --needed --disable-download-timeout \
+        meson ninja tllist \
+    && curl -fsSLo /tmp/wbg.tar.gz \
+        "https://codeberg.org/dnkl/wbg/releases/download/${WBG_VERSION}/wbg-${WBG_VERSION}.tar.gz" \
+    && printf '%s  %s\n' "$WBG_SHA256" /tmp/wbg.tar.gz | sha256sum -c - \
+    && tar -xzf /tmp/wbg.tar.gz -C /tmp \
+    && meson setup /tmp/wbg-build "/tmp/wbg-${WBG_VERSION}" \
+        --buildtype=release \
+        --prefix=/usr \
+        -Dpng=enabled \
+        -Djpeg=disabled \
+        -Dwebp=disabled \
+        -Djxl=disabled \
+        -Dsvg=false \
+    && ninja -C /tmp/wbg-build \
+    && install -Dm0755 /tmp/wbg-build/wbg /out/wbg
 
 FROM ${BASE_IMAGE} AS rust-builder
 
@@ -91,7 +115,7 @@ COPY --from=apollo-builder /home/builder/apollo-git/*.pkg.tar.zst /tmp/apollo/
 RUN pacman -U --noconfirm /tmp/apollo/*.pkg.tar.zst && rm -rf /tmp/apollo
 
 COPY --from=native-builder /out/xinput1_4.dll /usr/lib/vulcan/xinput1_4.dll
-COPY --from=native-builder /out/libglycin-nosandbox.so /usr/lib/libglycin-nosandbox.so
+COPY --from=wbg-builder /out/wbg /usr/local/bin/wbg
 
 COPY --from=rust-builder /build/target/release/libvulcan_uinput_shim.so /usr/lib/libvulcan_uinput_shim.so
 COPY --from=rust-builder /build/target/release/vulcan-inputd /usr/local/bin/vulcan-inputd

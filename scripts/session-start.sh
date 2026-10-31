@@ -45,6 +45,14 @@ fi
 export WAYLAND_DISPLAY="$(basename "$wayland_socket")"
 unset DISPLAY
 
+# wbg decodes the PNG itself; gdk-pixbuf and glycin stay off the wallpaper path.
+# Stretch keeps the frame filled for any GAME_MODE aspect ratio.
+if [ -x /usr/local/bin/wbg ]; then
+    /usr/local/bin/wbg -s /usr/share/vulcan/wallpaper.png >>/data/log/sway.log 2>&1 &
+else
+    printf '[vulcan] wbg not found; no wallpaper\n' >&2
+fi
+
 if [ "$INPUT_TRANSPORT" = "socket" ]; then
     export VULCAN_INPUT_SOCKET="${VULCAN_INPUT_SOCKET:-${XDG_RUNTIME_DIR}/vulcan-input.sock}"
     if [ "${INPUT_GAMEPAD:-1}" = "1" ]; then
