@@ -38,6 +38,7 @@ check_missing 'image does not install obs-studio' 'pacman -S --noconfirm --neede
 
 check_contains 'compose passes the capture ref' 'OBS_VKCAPTURE_REF' "$compose"
 check_contains 'capture is enabled by default' 'OBS_VKCAPTURE: "${OBS_VKCAPTURE:-1}"' "$compose"
+check_contains 'compose passes the capture name override' 'OBS_VKCAPTURE_NAME' "$compose"
 check_contains 'image tag includes the capture ref' '$(OBS_VKCAPTURE_REF)' "$makefile"
 check_contains 'launcher defaults capture on' 'OBS_VKCAPTURE="${OBS_VKCAPTURE:-1}"' "$launcher"
 check_contains 'launcher wraps the wine runner' 'runner=("$OBS_GAMECAPTURE_BIN" "${runner[@]}")' "$launcher"

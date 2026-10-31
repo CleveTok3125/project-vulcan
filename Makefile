@@ -62,7 +62,9 @@ IMAGE_TAG := local-$(shell printf '%s' '$(BASE_TAG)|$(GPU_VENDOR)|$(APOLLO_PKG)|
 IMAGE := vulcan/game-stream:$(IMAGE_TAG)
 export IMAGE_TAG
 
-COMPOSE = AUDIO_RUNTIME_DIR="$(AUDIO_RUNTIME_DIR)" docker compose --env-file $(P_SINGLE) -f compose.yaml -f compose.nvidia.yaml -f $(GAMES_COMPOSE)
+# The NVIDIA override exposes host driver nodes that do not exist on AMD/Intel.
+COMPOSE_NVIDIA := $(if $(filter nvidia,$(GPU_VENDOR)),-f compose.nvidia.yaml,)
+COMPOSE = AUDIO_RUNTIME_DIR="$(AUDIO_RUNTIME_DIR)" docker compose --env-file $(P_SINGLE) -f compose.yaml $(COMPOSE_NVIDIA) -f $(GAMES_COMPOSE)
 CONTAINER := vulcan-$(SESSION_ID)
 VOLUME := vulcan_$(SESSION_ID)-data
 
@@ -246,7 +248,7 @@ else
 	done
 endif
 
-stats: _check-presets ## [presets] Show container CPU, memory, and GPU usage
+stats: _check-presets ## [presets] Show container CPU/memory and NVIDIA GPU usage
 ifeq ($(P_COUNT),1)
 	@docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}' $(CONTAINER)
 	@docker exec $(CONTAINER) nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits | awk -F', ' '{printf "GPU: %s%%  VRAM: %s/%s MiB  Temp: %s C\n", $$1, $$2, $$3, $$4}'
@@ -384,7 +386,7 @@ else
 endif
 
 audio-up: _check-presets _audio-runtime ## [preset] Expose the session audio to host OBS
-	@AUDIO_LATENCY_MSEC="$(AUDIO_LATENCY_MSEC)" scripts/obs-audio.sh up "$(AUDIO_RUNTIME_DIR)" "$(SESSION_ID)"
+	@AUDIO_SOURCE="$(AUDIO_SOURCE)" AUDIO_LATENCY_MSEC="$(AUDIO_LATENCY_MSEC)" scripts/obs-audio.sh up "$(AUDIO_RUNTIME_DIR)" "$(SESSION_ID)"
 
 audio-down: _check-presets ## [preset] Remove the session audio tunnel
 	@scripts/obs-audio.sh down "$(AUDIO_RUNTIME_DIR)" "$(SESSION_ID)"

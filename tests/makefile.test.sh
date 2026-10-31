@@ -67,11 +67,18 @@ check_missing 'explicit env file replaces default' '--env-file .env.local' "$out
 check_contains 'explicit preset volume' 'vulcan_demo-data' "$(run_make clean-overlay P=preset.env)"
 check_contains 'explicit preset compose down' '--env-file preset.env' "$(run_make down P=preset.env)"
 
+out="$(run_make up P=nvidia.env)"
+check_contains 'nvidia preset adds the device override' 'compose.nvidia.yaml' "$out"
+out="$(run_make up P=amd.env)"
+check_missing 'amd preset skips the nvidia override' 'compose.nvidia.yaml' "$out"
+
 # The audio tunnel latency is configurable through the preset.
 out="$(run_make audio-up)"
 check_contains 'audio-up passes the configured latency' 'AUDIO_LATENCY_MSEC="60"' "$out"
 out="$(run_make audio-up AUDIO_LATENCY_MSEC=30)"
 check_contains 'audio-up accepts a latency override' 'AUDIO_LATENCY_MSEC="30"' "$out"
+out="$(run_make audio-up AUDIO_SOURCE=custom.monitor)"
+check_contains 'audio-up accepts a source override' 'AUDIO_SOURCE="custom.monitor"' "$out"
 
 # Session teardown also unloads the host audio tunnel.
 out="$(run_make down)"
