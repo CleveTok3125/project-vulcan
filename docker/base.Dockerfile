@@ -58,7 +58,6 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
         gamescope \
         libei \
         wine-mono \
-        swaybg \
         grim \
         btop \
         nvtop \
