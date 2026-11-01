@@ -54,7 +54,7 @@ if [ "$1" = "wineboot" ]; then
     if [ "${FAKE_WINEBOOT_FAIL:-0}" = "1" ]; then
         exit 1
     fi
-    mkdir -p "$WINEPREFIX/drive_c/windows/system32"
+    mkdir -p "$WINEPREFIX/drive_c/windows/system32" "$WINEPREFIX/drive_c/windows/syswow64"
 fi
 exit 0
 EOF
@@ -238,6 +238,39 @@ check 'xinput proxy skipped when disabled' 'no' \
     "$([ -f "$workdir/prefix/test/drive_c/windows/system32/xinput1_4.dll" ] && printf yes || printf no)"
 check 'xinput override skipped when disabled' 'no' \
     "$(grep -q 'xinput1_4' "$wine_log" && printf yes || printf no)"
+
+# A 32-bit process resolves system32 to syswow64 and needs its own copy.
+rm -rf "$workdir/prefix/test"
+xinput_dll_32="$workdir/xinput1_4_32.dll"
+printf 'xinput32' >"$xinput_dll_32"
+: >"$wine_log"
+run_launch test XINPUT_DLL="$xinput_dll" XINPUT_DLL_32="$xinput_dll_32" 2>"$workdir/gamepad-32.log"
+check '32-bit xinput proxy installed' 'yes' \
+    "$([ -f "$workdir/prefix/test/drive_c/windows/syswow64/xinput1_4.dll" ] && printf yes || printf no)"
+check '32-bit proxy keeps its own binary' 'xinput32' \
+    "$(cat "$workdir/prefix/test/drive_c/windows/syswow64/xinput1_4.dll" 2>/dev/null || true)"
+check '32-bit alias xinput1_3 installed' 'xinput32' \
+    "$(cat "$workdir/prefix/test/drive_c/windows/syswow64/xinput1_3.dll" 2>/dev/null || true)"
+check '32-bit alias xinput9_1_0 installed' 'xinput32' \
+    "$(cat "$workdir/prefix/test/drive_c/windows/syswow64/xinput9_1_0.dll" 2>/dev/null || true)"
+
+# A missing 32-bit proxy is reported without disturbing the 64-bit install.
+rm -rf "$workdir/prefix/test"
+: >"$wine_log"
+run_launch test XINPUT_DLL="$xinput_dll" XINPUT_DLL_32="$workdir/missing32.dll" 2>"$workdir/gamepad-32-missing.log"
+check 'missing 32-bit proxy is reported' '1' \
+    "$(grep -c '32-bit XInput proxy not found' "$workdir/gamepad-32-missing.log")"
+check 'missing 32-bit proxy keeps the 64-bit install' 'yes' \
+    "$([ -f "$workdir/prefix/test/drive_c/windows/system32/xinput1_4.dll" ] && printf yes || printf no)"
+
+# A win32 prefix stores 32-bit modules in system32.
+rm -rf "$workdir/prefix/test"
+: >"$wine_log"
+run_launch test WINEARCH=win32 XINPUT_DLL="$xinput_dll" XINPUT_DLL_32="$xinput_dll_32" 2>"$workdir/gamepad-win32.log"
+check 'win32 prefix receives the 32-bit proxy' 'xinput32' \
+    "$(cat "$workdir/prefix/test/drive_c/windows/system32/xinput1_4.dll" 2>/dev/null || true)"
+check 'win32 prefix logs no missing proxy' '0' \
+    "$(grep -c 'XInput proxy not found' "$workdir/gamepad-win32.log" || true)"
 
 # Stored game state is cleared once per prefix using the catalog entry.
 rm -rf "$workdir/prefix/test"

@@ -178,13 +178,35 @@ if [ "$D3D_BACKEND" = "dxvk" ]; then
 fi
 
 XINPUT_DLL="${XINPUT_DLL:-/usr/lib/vulcan/xinput1_4.dll}"
+XINPUT_DLL_32="${XINPUT_DLL_32:-/usr/lib/vulcan/xinput1_4_32.dll}"
 if [ "$INPUT_GAMEPAD" = "1" ]; then
-    if [ -f "$XINPUT_DLL" ]; then
-        for dll in xinput1_4.dll xinput1_3.dll xinput9_1_0.dll; do
-            install -m 0644 "$XINPUT_DLL" "$WINEPREFIX/drive_c/windows/system32/$dll"
-        done
+    if [ "$WINEARCH" = "win32" ]; then
+        # A 32-bit prefix stores 32-bit modules in system32.
+        if [ -f "$XINPUT_DLL_32" ]; then
+            for dll in xinput1_4.dll xinput1_3.dll xinput9_1_0.dll; do
+                install -m 0644 "$XINPUT_DLL_32" "$WINEPREFIX/drive_c/windows/system32/$dll"
+            done
+        else
+            printf '[vulcan] 32-bit XInput proxy not found: %s; gamepad disabled\n' "$XINPUT_DLL_32" >&2
+        fi
     else
-        printf '[vulcan] XInput proxy not found: %s; gamepad disabled\n' "$XINPUT_DLL" >&2
+        if [ -f "$XINPUT_DLL" ]; then
+            for dll in xinput1_4.dll xinput1_3.dll xinput9_1_0.dll; do
+                install -m 0644 "$XINPUT_DLL" "$WINEPREFIX/drive_c/windows/system32/$dll"
+            done
+        else
+            printf '[vulcan] XInput proxy not found: %s; gamepad disabled\n' "$XINPUT_DLL" >&2
+        fi
+        # A 32-bit process resolves system32 to syswow64, so it needs its own copy.
+        if [ ! -f "$XINPUT_DLL_32" ]; then
+            printf '[vulcan] 32-bit XInput proxy not found: %s\n' "$XINPUT_DLL_32" >&2
+        elif [ ! -d "$WINEPREFIX/drive_c/windows/syswow64" ]; then
+            printf '[vulcan] prefix has no syswow64; 32-bit proxy not installed\n' >&2
+        else
+            for dll in xinput1_4.dll xinput1_3.dll xinput9_1_0.dll; do
+                install -m 0644 "$XINPUT_DLL_32" "$WINEPREFIX/drive_c/windows/syswow64/$dll"
+            done
+        fi
     fi
     ln -sfn "${VULCAN_GAMEPAD_STATE:-/data/vulcan-gamepad.bin}" \
         "$WINEPREFIX/drive_c/vulcan-gamepad.bin"
