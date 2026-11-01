@@ -42,6 +42,14 @@ check_missing "entrypoint creates no network namespace" "ip netns" "$entrypoint"
 check_contains "apollo loads the socket shim" \
     "LD_PRELOAD=/usr/lib/libvulcan_uinput_shim.so" "$session_start"
 check_contains "session sets the input socket" "VULCAN_INPUT_SOCKET=" "$session_start"
+check_contains "session output has its own log" "session-start.log" "$entrypoint"
+
+if grep -A1 -F '/usr/local/bin/session-start.sh' "$entrypoint" | grep -Fq 'sway.log'; then
+    printf 'FAIL session output is appended to the sway log\n' >&2
+    failures=$((failures + 1))
+else
+    printf 'ok   session output is not in the sway log\n'
+fi
 
 check_missing "compose passes no input device cgroup" "device_cgroup_rules" "$compose"
 check_missing "compose grants no mknod" "MKNOD" "$compose"

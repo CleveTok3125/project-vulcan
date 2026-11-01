@@ -83,6 +83,7 @@ services:
       APOLLO_ADAPTER: "${APOLLO_ADAPTER:-}"
       APOLLO_NAME: "${APOLLO_NAME:-}"
       APOLLO_PORT: "${APOLLO_PORT:-47989}"
+      APOLLO_LOG_LEVEL: "${APOLLO_LOG_LEVEL:-2}"
 
       WINE_ROOT: "${WINE_ROOT:-/data/spritz-wine-tkg}"
       UMU_USE_STEAM: "${UMU_USE_STEAM:-1}"

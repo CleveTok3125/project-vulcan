@@ -5,6 +5,7 @@ set -Eeuo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 template="$repo_root/config/apollo/sunshine.conf.in"
 entrypoint="$repo_root/scripts/entrypoint.sh"
+compose="$repo_root/compose.yaml"
 
 failures=0
 
@@ -18,9 +19,23 @@ check_contains() {
     fi
 }
 
+check_missing() {
+    local label="$1" needle="$2" file="$3"
+    if grep -Fq -- "$needle" "$file"; then
+        printf 'FAIL %s: unexpected [%s] in %s\n' "$label" "$needle" "$file" >&2
+        failures=$((failures + 1))
+    else
+        printf 'ok   %s\n' "$label"
+    fi
+}
+
 check_contains 'apollo captures the virtual sink' 'audio_sink = sink-sunshine-stereo' "$template"
 check_contains 'entrypoint creates that sink' 'sink_name=vulcan_game' "$entrypoint"
 check_contains 'entrypoint makes it the default sink' 'set-default-sink vulcan_game' "$entrypoint"
+check_contains 'apollo log level is templated' 'min_log_level = @LOG_LEVEL@' "$template"
+check_contains 'entrypoint renders the log level' '@LOG_LEVEL@' "$entrypoint"
+check_contains 'compose defaults the log level' 'APOLLO_LOG_LEVEL' "$compose"
+check_missing 'template keeps no verbose default' 'min_log_level = 0' "$template"
 
 if [ "$failures" -ne 0 ]; then
     printf '%s check(s) failed\n' "$failures" >&2

@@ -181,6 +181,7 @@ sed \
     -e "s|@PORT@|${APOLLO_PORT}|g" \
     -e "s|@ADAPTER@|${APOLLO_ADAPTER}|g" \
     -e "s|@OUTPUT@|${APOLLO_OUTPUT}|g" \
+    -e "s|@LOG_LEVEL@|${APOLLO_LOG_LEVEL:-2}|g" \
     /config/apollo/sunshine.conf.in >/data/apollo/sunshine.conf
 
 SWAY_XWAYLAND="$(sway_xwayland "${GAMESCOPE_ENABLED:-1}")"
@@ -224,7 +225,7 @@ SWAY_PID=$!
     XCURSOR_THEME=Adwaita \
     XCURSOR_SIZE=24 \
     /usr/local/bin/session-start.sh \
-    >>/data/log/sway.log 2>&1 &
+    >>/data/log/session-start.log 2>&1 &
 
 log "Sway pid ${SWAY_PID}"
 # Root privileges are no longer needed; keep the session alive as the game

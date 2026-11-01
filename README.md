@@ -411,7 +411,7 @@ AMD/Intel presets use the same targets without it.
    ```bash
    make stats  # NVIDIA only; see AMD and Intel
    docker compose --env-file .env.local exec game ls -l /dev/dri
-   docker compose --env-file .env.local exec game tail -f /data/log/sway.log
+   docker compose --env-file .env.local exec game tail -f /data/log/session-start.log
    ```
 
 To add or remove games, edit `games.yaml` and restart the session; see
@@ -829,9 +829,16 @@ events.
 Logs:
 
 ```bash
+docker compose --env-file .env.local exec game tail -f /data/apollo/sunshine.log
+docker compose --env-file .env.local exec game tail -f /data/log/session-start.log
 docker compose --env-file .env.local exec game tail -f /data/log/sway.log
 docker compose --env-file .env.local exec game tail -f /data/log/vulcan-inputd.log
 ```
+
+Apollo writes its own log to `/data/apollo/sunshine.log`. `session-start.log`
+holds the session startup and Apollo console output; `sway.log` holds Sway only.
+`APOLLO_LOG_LEVEL` defaults to `2` (info); `0` and `1` enable verbose/debug
+logging and grow quickly during streaming.
 
 ### Session isolation
 
