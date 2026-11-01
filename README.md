@@ -720,6 +720,9 @@ handing it to Sway.
 ```text
 Apollo gamepad -> shim -> vulcan-inputd -> vulcan-gamepad.bin
               -> xinput1_4.dll (Wine prefix) -> game
+
+game vibration -> xinput1_4.dll -> vulcan-rumble.bin
+               -> Apollo -> Moonlight client -> controller
 ```
 
 The shim fakes the gamepad and `vulcan-inputd` writes the pad state to
@@ -735,18 +738,36 @@ the socket exists only while the container runs.
 sets `WINEDLLOVERRIDES`. The 64-bit DLL goes to
 `drive_c/windows/system32`, the 32-bit DLL to `drive_c/windows/syswow64`,
 because a 32-bit process resolves `system32` to `syswow64`. Set
-`INPUT_GAMEPAD=0` to skip both the pad state file and the DLLs. Games that use
-DirectInput or raw HID instead of XInput do not see a controller.
+`INPUT_GAMEPAD=0` to skip the pad state file, the rumble link, and the DLLs.
+Games that use DirectInput or raw HID instead of XInput do not see a
+controller.
 
 The proxy reports the pad only after Apollo creates the virtual gamepad for
 the streaming client, so a client without a controller sees no XInput
 device. The guide button is reported only through the undocumented ordinal
 100, which SDL and most overlays use; the documented `XInputGetState` masks
 it out and `XInputGetCapabilities` keeps the real-hardware mask `0xF3FF`.
-Vibration requests are accepted and dropped: Apollo supports rumble, but the
-Vulcan shim replaces the virtual uinput device, so its force-feedback
-listener is disabled. Gyroscope, adaptive triggers, and the RGB LED are not
-part of XInput and stay unavailable.
+Vibration is forwarded to the client. `XInputSetState` writes both motor
+speeds to `C:\vulcan-data\vulcan-rumble.bin`, which is the session's
+`/data/vulcan-rumble.bin`; the Apollo build reads that file and sends the
+usual rumble feedback message. `launch-game.sh` links `C:\vulcan-data` to
+`VULCAN_RUMBLE_DIR` (default `/data`) so the atomic rewrite stays inside the
+session volume. The proxy keeps the last value until the game changes it and
+stops it when the pad is removed. `launch-game.sh` runs the game as a child.
+It clears a stale record and lock before a new game, watches for the game
+process to exit, runs `wineserver -k` and terminates leftover `winedevice`
+processes so Wine services and gamescope stop, and clears the record and lock
+again after the wrapper exits.
+
+Only the two grip motors are supported. Trigger rumble, gyroscope, adaptive
+triggers, and the RGB LED are not part of `XInputSetState` and stay
+unavailable. Only the first allocated pad drives rumble; a second client
+controller does not get a separate stream.
+
+`VULCAN_RUMBLE_DIR` must point to an existing directory. The session start
+resolves a relative path; `launch-game.sh` logs a warning and leaves rumble
+disabled when the directory is missing. The reader is applied to the default
+`apollo-git` build; a different `APOLLO_PKG` builds without it.
 
 Sway runs with `WLR_BACKENDS=headless`. `GAMESCOPE_TOUCH_MODE` controls
 gamescope's touch handling. Pointer and keyboard input reaches the game
