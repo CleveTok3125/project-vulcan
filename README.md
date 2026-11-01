@@ -45,6 +45,7 @@ which is not available in this container.
 - [Configuration](#configuration)
   - [Game catalog](#game-catalog)
   - [Sessions](#sessions)
+  - [Recreating a Wine prefix](#recreating-a-wine-prefix)
   - [Migrating from per-game presets](#migrating-from-per-game-presets)
   - [Ports](#ports)
 - [Fresh deployment](#fresh-deployment)
@@ -290,6 +291,39 @@ it only after the copy is verified.
 
 `make uninstall` leaves a host data directory in place. Remove the volume
 metadata and the directory manually after verifying the backup.
+
+### Recreating a Wine prefix
+
+A game that hangs or crashes before its first frame, while the same game files
+work outside the container, may have a corrupted Wine prefix. Reset one game
+without touching the others:
+
+```bash
+docker exec -u game vulcan-<session> sh -c \
+  'mv /data/prefix/<id> /data/prefix/<id>.bak-$(date +%Y%m%d_%H%M%S)'
+```
+
+Start the app again. `launch-game.sh` runs `wineboot --init` and recreates the
+prefix, DXVK files, and XInput proxies for the next launch. Online progress is
+stored on the game server; local settings may reset.
+
+To keep local settings and the device ID, initialize the new prefix first and
+then copy user data from the backup:
+
+```bash
+docker exec -u game vulcan-<session> sh -c '
+  old=/data/prefix/<id>.bak-<timestamp>
+  new=/data/prefix/<id>
+  cp -a "$old/user.reg" "$new/user.reg"
+  cp -a "$old/drive_c/users/<user>/AppData/LocalLow/<vendor>" \
+        "$new/drive_c/users/<user>/AppData/LocalLow/"
+'
+```
+
+Copy only user data. Do not copy `system.reg`, `drive_c/windows`, or driver and
+service files from a prefix suspected to be corrupt; they can carry the fault
+into the new prefix. Remove the backup after a game has launched from the new
+prefix.
 
 ### Migrating from per-game presets
 
