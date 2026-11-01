@@ -50,11 +50,39 @@ COPY native /src
 RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
     /usr/local/bin/fetch-heavy mingw-w64-gcc \
     && pacman -S --noconfirm --needed --disable-download-timeout mingw-w64-gcc \
-    && mkdir -p /out \
-    && x86_64-w64-mingw32-gcc -shared -O2 \
-        -o /out/xinput1_4.dll \
+    && mkdir -p /out/x86_64 /out/i686 \
+    && x86_64-w64-mingw32-gcc -shared -O2 -Wall -Wextra -Werror \
+        -o /out/x86_64/xinput1_4.dll \
         /src/xinput1_4.c /src/xinput1_4.def \
-        -Wl,--no-insert-timestamp
+        -Wl,--no-insert-timestamp \
+    && i686-w64-mingw32-gcc -shared -O2 -Wall -Wextra -Werror \
+        -o /out/i686/xinput1_4.dll \
+        /src/xinput1_4.c /src/xinput1_4.def \
+        -Wl,--no-insert-timestamp \
+    && x86_64-w64-mingw32-gcc -O2 -Wall -Wextra -Werror \
+        -o /out/x86_64/probe.exe /src/xinput_probe.c \
+    && i686-w64-mingw32-gcc -O2 -Wall -Wextra -Werror \
+        -o /out/i686/probe.exe /src/xinput_probe.c \
+    && for arch in x86_64 i686; do \
+        objdump="${arch}-w64-mingw32-objdump"; \
+        "$objdump" -p "/out/${arch}/xinput1_4.dll" > "/tmp/${arch}-exports.txt"; \
+        grep -q '[+]base' "/tmp/${arch}-exports.txt" \
+            || { printf 'unexpected objdump export format for %s\n' "$arch" >&2; exit 1; }; \
+        sed -n 's/.*[+]base\[ *[0-9]*\] *[0-9]* *//p' "/tmp/${arch}-exports.txt" \
+            > "/tmp/${arch}-names.txt"; \
+        for name in XInputGetState XInputSetState XInputGetCapabilities XInputEnable \
+                    XInputGetBatteryInformation XInputGetKeystroke XInputGetAudioDeviceIds \
+                    XInputGetStateEx XInputGetCapabilitiesEx; do \
+            grep -qx "$name" "/tmp/${arch}-names.txt" \
+                || { printf 'missing export %s for %s\n' "$name" "$arch" >&2; exit 1; }; \
+        done; \
+        sed -n 's/.*[+]base\[ *100\] *[0-9]* *//p' "/tmp/${arch}-exports.txt" \
+            | grep -qx 'XInputGetStateEx' \
+            || { printf 'ordinal 100 is not XInputGetStateEx for %s\n' "$arch" >&2; exit 1; }; \
+        sed -n 's/.*[+]base\[ *108\] *[0-9]* *//p' "/tmp/${arch}-exports.txt" \
+            | grep -qx 'XInputGetCapabilitiesEx' \
+            || { printf 'ordinal 108 is not XInputGetCapabilitiesEx for %s\n' "$arch" >&2; exit 1; }; \
+    done
 
 # wbg draws the wallpaper without gdk-pixbuf, so no image loader is spawned
 # through glycin and no bubblewrap sandbox is required at runtime.
@@ -91,6 +119,31 @@ WORKDIR /build
 RUN --mount=type=cache,target=/root/.cargo/registry,sharing=locked \
     --mount=type=cache,target=/root/.cargo/git,sharing=locked \
     cargo build --release --locked
+RUN --mount=type=cache,target=/root/.cargo/registry,sharing=locked \
+    --mount=type=cache,target=/root/.cargo/git,sharing=locked \
+    cargo test --release --locked
+
+# Runs the probe under the Wine already present in the base image. Only the
+# native-builder stage and this stage are built; the game image never copies
+# the probes. Enable it with XINPUT_RUNTIME_TEST=1.
+FROM ${BASE_IMAGE} AS xinput-test
+
+COPY --from=native-builder /out /out
+ARG XINPUT_RUNTIME_TEST=0
+
+RUN if [ "$XINPUT_RUNTIME_TEST" != "1" ]; then \
+        printf '%s\n' 'xinput runtime tests skipped'; \
+    else \
+        command -v wine >/dev/null 2>&1 \
+            || { printf '%s\n' 'wine is required for the xinput runtime tests' >&2; exit 1; }; \
+        export WINEDEBUG=-all DISPLAY= XDG_RUNTIME_DIR=/tmp \
+            WINEDLLOVERRIDES='xinput1_4,xinput1_3,xinput9_1_0=n'; \
+        for arch in x86_64 i686; do \
+            export WINEPREFIX="/tmp/wine-${arch}"; \
+            wineboot --init; \
+            wine "/out/${arch}/probe.exe" || exit 1; \
+        done; \
+    fi
 
 FROM ${BASE_IMAGE} AS vkcapture-builder
 
@@ -114,7 +167,8 @@ FROM game-base
 COPY --from=apollo-builder /home/builder/apollo-git/*.pkg.tar.zst /tmp/apollo/
 RUN pacman -U --noconfirm /tmp/apollo/*.pkg.tar.zst && rm -rf /tmp/apollo
 
-COPY --from=native-builder /out/xinput1_4.dll /usr/lib/vulcan/xinput1_4.dll
+COPY --from=native-builder /out/x86_64/xinput1_4.dll /usr/lib/vulcan/xinput1_4.dll
+COPY --from=native-builder /out/i686/xinput1_4.dll /usr/lib/vulcan/xinput1_4_32.dll
 COPY --from=wbg-builder /out/wbg /usr/local/bin/wbg
 
 COPY --from=rust-builder /build/target/release/libvulcan_uinput_shim.so /usr/lib/libvulcan_uinput_shim.so
@@ -137,6 +191,7 @@ RUN chmod 0755 \
         /usr/local/bin/vulcan-inputd \
     && chmod 0644 \
         /usr/lib/vulcan/xinput1_4.dll \
+        /usr/lib/vulcan/xinput1_4_32.dll \
         /config/sway/config.in \
         /config/apollo/* \
         /usr/share/vulcan/wallpaper.png \
