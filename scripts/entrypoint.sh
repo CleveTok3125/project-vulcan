@@ -150,6 +150,8 @@ as_game env \
 # Input arrives over the socket shim and gamescope EIS, so Sway has no input
 # devices of its own and only needs the headless backend.
 SWAY_BACKENDS="headless"
+SWAY_RENDERER="${SWAY_RENDERER:-}"
+SWAY_ALLOW_SOFTWARE="${SWAY_ALLOW_SOFTWARE:-1}"
 
 APOLLO_ENCODER="${APOLLO_ENCODER:-nvenc}"
 APOLLO_NAME="${APOLLO_NAME:-Vulcan-${SESSION_ID}}"
@@ -198,6 +200,14 @@ if [ -z "$APOLLO_ADAPTER" ]; then
 fi
 
 log "starting Sway with ${SWAY_BACKENDS}"
+sway_env=(
+    "WLR_BACKENDS=$SWAY_BACKENDS"
+    "WLR_RENDER_DRM_DEVICE=$RENDER_NODE"
+    "WLR_RENDERER_ALLOW_SOFTWARE=$SWAY_ALLOW_SOFTWARE"
+)
+if [ -n "$SWAY_RENDERER" ]; then
+    sway_env+=("WLR_RENDERER=$SWAY_RENDERER")
+fi
 "${SETPRIV_CMD[@]}" env \
     DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
     XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
@@ -206,9 +216,7 @@ log "starting Sway with ${SWAY_BACKENDS}"
     XDG_CURRENT_DESKTOP=sway \
     XCURSOR_THEME=Adwaita \
     XCURSOR_SIZE=24 \
-    WLR_BACKENDS="$SWAY_BACKENDS" \
-    WLR_RENDER_DRM_DEVICE="$RENDER_NODE" \
-    WLR_RENDERER_ALLOW_SOFTWARE=1 \
+    "${sway_env[@]}" \
     sway -c /data/sway/config \
     >/data/log/sway.log 2>&1 &
 

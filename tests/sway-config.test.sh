@@ -52,6 +52,22 @@ else
     failures=$((failures + 1))
 fi
 
+if grep -Fq -- 'SWAY_RENDERER' "$repo_root/scripts/entrypoint.sh" \
+    && grep -Fq -- 'WLR_RENDERER' "$repo_root/scripts/entrypoint.sh"; then
+    printf 'ok   entrypoint supports a renderer override\n'
+else
+    printf 'FAIL entrypoint has no renderer override\n' >&2
+    failures=$((failures + 1))
+fi
+
+if grep -Fq -- 'SWAY_RENDERER' "$repo_root/compose.yaml" \
+    && grep -Fq -- 'SWAY_ALLOW_SOFTWARE' "$repo_root/compose.yaml"; then
+    printf 'ok   compose passes the renderer settings\n'
+else
+    printf 'FAIL compose does not pass the renderer settings\n' >&2
+    failures=$((failures + 1))
+fi
+
 if [ "$failures" -ne 0 ]; then
     printf '%d checks failed\n' "$failures" >&2
     exit 1

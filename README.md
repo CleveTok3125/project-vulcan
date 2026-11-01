@@ -810,6 +810,13 @@ gamescope's touch handling. Pointer and keyboard input reaches the game
 through gamescope EIS, so Sway has no input device and does not draw the
 streamed cursor.
 
+`SWAY_RENDERER` selects the wlroots renderer (`gles2` or `pixman`), and
+`SWAY_ALLOW_SOFTWARE=0` disables the pixman fallback. On the tested NVIDIA
+headless session, forcing `gles2` keeps a backend DRM FD so gamescope can use
+its DMA-BUF path; without it Sway logs `Failed to get backend DRM FD` on each
+client connection and falls back to shared memory. The sample preset leaves
+both unset; the tested session uses GLES2 without the software fallback.
+
 Sway does not start Xwayland while gamescope is enabled: gamescope runs its
 own X server for Wine, and Sway's instance would only compete for the abstract
 X11 socket names that the host already owns, because the container uses the
