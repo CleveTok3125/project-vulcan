@@ -170,7 +170,8 @@ generated JSON and one read-only bind for every catalog game.
 defaults to `games.yaml`; `GID_RENDER` and `GID_VIDEO` are required by Compose.
 `SESSION_ID` names the compose project, container `vulcan-<SESSION_ID>`, volume
 `vulcan_<SESSION_ID>-data`, and the default Apollo host name
-`Vulcan-<SESSION_ID>`.
+`Vulcan-<SESSION_ID>`. `VULCAN_DATA_DIR` is optional and selects a host
+directory for that volume; see [Session data location](#session-data-location).
 
 ### Game catalog
 
@@ -254,6 +255,41 @@ at a time, such as `logs`, `shell`, `btop`, `nvtop`, `watch`, `volume`,
 `make volumes` lists every Vulcan volume; add `P=".env.multi:.env.other"` to
 list only those presets. Volumes of sessions that are no longer configured
 remain on the host; remove them with `docker volume rm`.
+
+### Session data location
+
+By default the session volume `vulcan_<SESSION_ID>-data` lives in Docker's
+data root. Set `VULCAN_DATA_DIR` to an absolute host directory to bind the
+same volume to a different filesystem:
+
+```bash
+# .env.multi
+VULCAN_DATA_DIR=/mnt/fast/vulcan-multi-data
+```
+
+The Makefile adds `compose.data.yaml`, which declares the volume with
+`type=none`, `o=bind`, and the configured device. `make volume` shows the
+resolved `options`; a direct `docker compose` invocation must add
+`-f compose.data.yaml`.
+
+The directory must exist and be writable by the container game UID (1000 by
+default). To move an existing session, stop the container and copy the volume
+contents before removing the old volume:
+
+```bash
+docker run --rm --cap-add SYS_ADMIN \
+  -v vulcan_<SESSION_ID>-data:/src:ro \
+  -v /mnt/fast/vulcan-multi-data:/dst \
+  --entrypoint sh vulcan/game-stream:<tag> -c 'cp -a /src/. /dst/'
+```
+
+`cp -a` preserves ownership and the `trusted.overlay.*` xattrs and whiteout
+devices that the game overlays need. Keep a backup until a game has launched
+from the moved volume. Removing `vulcan_<SESSION_ID>-data` is destructive; do
+it only after the copy is verified.
+
+`make uninstall` leaves a host data directory in place. Remove the volume
+metadata and the directory manually after verifying the backup.
 
 ### Migrating from per-game presets
 

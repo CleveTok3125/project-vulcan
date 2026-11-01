@@ -36,7 +36,7 @@ fi
 
 repo="$workdir/repo"
 mkdir -p "$repo/.generated" "$workdir/source"
-cp "$repo_root/compose.yaml" "$repo_root/compose.nvidia.yaml" "$repo/"
+cp "$repo_root/compose.yaml" "$repo_root/compose.nvidia.yaml" "$repo_root/compose.data.yaml" "$repo/"
 printf '{"games":[]}\n' >"$repo/.generated/games.json"
 printf 'services:\n  game:\n    volumes: []\n' >"$repo/.generated/compose.games.yaml"
 
@@ -83,6 +83,17 @@ second="$(render "$workdir/second.env")"
 
 check_project first demo-one 47989 demo-two "$first"
 check_project second demo-two 47999 demo-one "$second"
+
+data_dir="$workdir/data"
+mkdir -p "$data_dir"
+data_config="$(BASE_IMAGE=vulcan/base:test VULCAN_DATA_DIR="$data_dir" \
+    docker compose --env-file "$workdir/first.env" \
+    -f "$repo/compose.yaml" -f "$repo/compose.nvidia.yaml" \
+    -f "$repo/compose.data.yaml" -f "$repo/.generated/compose.games.yaml" \
+    config 2>/dev/null)"
+check_contains 'host data driver' 'driver: local' "$data_config"
+check_contains 'host data device' "device: $data_dir" "$data_config"
+check_contains 'host data volume name' 'name: vulcan_demo-one-data' "$data_config"
 
 if [ "$failures" -ne 0 ]; then
     printf '%d checks failed\n' "$failures" >&2

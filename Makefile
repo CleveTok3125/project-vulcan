@@ -67,9 +67,12 @@ export IMAGE_TAG
 
 # The NVIDIA override exposes host driver nodes that do not exist on AMD/Intel.
 COMPOSE_NVIDIA := $(if $(filter nvidia,$(GPU_VENDOR)),-f compose.nvidia.yaml,)
-COMPOSE = AUDIO_RUNTIME_DIR="$(AUDIO_RUNTIME_DIR)" docker compose --env-file $(P_SINGLE) -f compose.yaml $(COMPOSE_NVIDIA) -f $(GAMES_COMPOSE)
+COMPOSE_DATA := $(if $(strip $(VULCAN_DATA_DIR)),-f compose.data.yaml,)
+COMPOSE = AUDIO_RUNTIME_DIR="$(AUDIO_RUNTIME_DIR)" docker compose --env-file $(P_SINGLE) -f compose.yaml $(COMPOSE_NVIDIA) $(COMPOSE_DATA) -f $(GAMES_COMPOSE)
 CONTAINER := vulcan-$(SESSION_ID)
 VOLUME := vulcan_$(SESSION_ID)-data
+UNINSTALL_VOLUME = $(if $(strip $(VULCAN_DATA_DIR)),$(COMPOSE) down,$(COMPOSE) down -v)
+UNINSTALL_DATA_NOTE = $(if $(strip $(VULCAN_DATA_DIR)),printf '[vulcan] host data kept at: %s\n' '$(VULCAN_DATA_DIR)',:)
 
 # The help tag on a target is the single source of truth for its preset scope:
 #   [global]  needs no preset
@@ -104,7 +107,7 @@ endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help base base-rebuild rm-base images volume volumes _volume-name build up rebuild _recreate stop down restart logs ps up-all down-all stop-all restart-all ps-all build-all stats-all uninstall-all check-ports check-xinput ports _check-presets _check-ports _games-config _audio-runtime audio-up audio-down audio-status config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
+.PHONY: help base base-rebuild rm-base images volume volumes _volume-name build up rebuild _recreate stop down restart logs ps up-all down-all stop-all restart-all ps-all build-all stats-all uninstall-all check-ports check-xinput ports _check-presets _check-ports _games-config _audio-runtime _data-runtime audio-up audio-down audio-status config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
 
 # The table keeps the file order of the targets inside each section. A `# ---`
 # line between blocks starts a new group, which the table separates with a blank
@@ -170,7 +173,10 @@ volumes: ## [global] List the Vulcan volumes
 	printf '%-28s %s\n' VOLUME SIZE; \
 	for name in $$names; do \
 		size=$$(printf '%s\n' "$$sizes" | awk -v n="$$name" '$$1 == n {print $$2}'); \
-		[ -n "$$size" ] || size='(missing)'; \
+		if [ -z "$$size" ]; then \
+			device=$$(docker volume inspect "$$name" --format '{{index .Options "device"}}' 2>/dev/null || true); \
+			if [ -n "$$device" ]; then size="bind:$$device"; else size='(missing)'; fi; \
+		fi; \
 		printf '%-28s %s\n' "$$name" "$$size"; \
 	done
 
@@ -187,7 +193,7 @@ endif
 
 rebuild: build _recreate ## [presets] Rebuild the image and recreate the container
 
-_recreate: _check-presets _games-config _audio-runtime
+_recreate: _check-presets _games-config _audio-runtime _data-runtime
 ifeq ($(P_COUNT),1)
 	$(COMPOSE) up -d --force-recreate
 else
@@ -197,7 +203,7 @@ else
 	done
 endif
 
-up: _check-presets _check-ports _games-config _audio-runtime ## [presets] Start the container in the background
+up: _check-presets _check-ports _games-config _audio-runtime _data-runtime ## [presets] Start the container in the background
 ifeq ($(P_COUNT),1)
 	$(COMPOSE) up -d
 else
@@ -273,6 +279,7 @@ volume: ## [preset] Show the volume of the selected preset
 		printf '%s (missing)\n' "$$name"; exit 0; \
 	fi; \
 	docker volume inspect "$$name" --format 'name={{.Name}} mount={{.Mountpoint}}'; \
+	docker volume inspect "$$name" --format 'driver={{.Driver}} options={{json .Options}}'; \
 	docker volume inspect "$$name" --format 'created={{.CreatedAt}}'; \
 	size=$$(docker system df -v | awk -v v="$$name" '$$1 == v {print $$3}'); \
 	printf 'size=%s\n' "$${size:-unknown}"
@@ -331,10 +338,11 @@ _clean-session: _check-presets _games-config
 	$(COMPOSE) up -d
 
 # ---
-uninstall: _check-presets _games-config _audio-teardown ## [presets] Remove the container, its data, and the image
+uninstall: _check-presets _games-config _audio-teardown ## [presets] Remove the container, managed data, and the image
 	@test "$(CONFIRM)" = "1" || { printf '%s\n' 'Refusing uninstall: run make uninstall CONFIRM=1'; exit 1; }
 ifeq ($(P_COUNT),1)
-	$(COMPOSE) down -v
+	$(UNINSTALL_VOLUME)
+	@$(UNINSTALL_DATA_NOTE)
 	@rm -rf "$(AUDIO_RUNTIME_DIR)/pulse" "$(AUDIO_RUNTIME_DIR)"/obs-audio*
 	@rmdir "$(AUDIO_RUNTIME_DIR)" 2>/dev/null || true
 	@if docker image inspect $(IMAGE) >/dev/null 2>&1; then \
@@ -385,6 +393,32 @@ _check-presets:
 _games-config:
 ifeq ($(P_COUNT),1)
 	@YQ="$(YQ)" scripts/generate-games-config.sh "$(GAMES_CATALOG)" "$(GAMES_OUTPUT_DIR)"
+else
+	@:
+endif
+
+_data-runtime:
+ifeq ($(P_COUNT),1)
+	@if [ -n "$(VULCAN_DATA_DIR)" ]; then \
+		case "$(VULCAN_DATA_DIR)" in \
+			/*) ;; \
+			*) printf 'VULCAN_DATA_DIR must be an absolute path: %s\n' "$(VULCAN_DATA_DIR)" >&2; exit 1 ;; \
+		esac; \
+		test -d "$(VULCAN_DATA_DIR)" || { \
+			printf 'missing data directory: %s\n' "$(VULCAN_DATA_DIR)" >&2; exit 1; \
+		}; \
+		test -w "$(VULCAN_DATA_DIR)" || { \
+			printf 'data directory is not writable: %s\n' "$(VULCAN_DATA_DIR)" >&2; exit 1; \
+		}; \
+		if docker volume inspect "$(VOLUME)" >/dev/null 2>&1; then \
+			device="$$(docker volume inspect "$(VOLUME)" --format '{{index .Options "device"}}')"; \
+			if [ "$$device" != "$(VULCAN_DATA_DIR)" ]; then \
+				printf 'volume %s is not bound to %s; migrate or remove it first\n' \
+					"$(VOLUME)" "$(VULCAN_DATA_DIR)" >&2; \
+				exit 1; \
+			fi; \
+		fi; \
+	fi
 else
 	@:
 endif

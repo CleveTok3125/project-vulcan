@@ -43,6 +43,13 @@ printf 'SESSION_ID=alpha\nGAMES_CATALOG=games.yaml\n' >"$workdir/.env.local"
 printf 'SESSION_ID=demo\nGAMES_CATALOG=games.yaml\n' >"$workdir/preset.env"
 printf 'SESSION_ID=demo\nGAMES_CATALOG=games.yaml\nGPU_VENDOR=nvidia\n' >"$workdir/nvidia.env"
 printf 'SESSION_ID=demo\nGAMES_CATALOG=games.yaml\nGPU_VENDOR=amd\n' >"$workdir/amd.env"
+mkdir -p "$workdir/data"
+printf 'SESSION_ID=data-check\nGAMES_CATALOG=games.yaml\nVULCAN_DATA_DIR=%s\n' \
+    "$workdir/data" >"$workdir/data.env"
+printf 'SESSION_ID=absent-data\nGAMES_CATALOG=games.yaml\nVULCAN_DATA_DIR=%s\n' \
+    "$workdir/missing-data" >"$workdir/missing-data.env"
+printf 'SESSION_ID=relative-data\nGAMES_CATALOG=games.yaml\nVULCAN_DATA_DIR=relative\n' \
+    >"$workdir/relative-data.env"
 
 run_make() {
     (cd "$workdir" && make --no-print-directory -n "$@")
@@ -71,6 +78,27 @@ out="$(run_make up P=nvidia.env)"
 check_contains 'nvidia preset adds the device override' 'compose.nvidia.yaml' "$out"
 out="$(run_make up P=amd.env)"
 check_missing 'amd preset skips the nvidia override' 'compose.nvidia.yaml' "$out"
+
+# A host data directory adds the storage override and changes teardown.
+out="$(run_make up P=data.env)"
+check_contains 'host data adds the storage override' 'compose.data.yaml' "$out"
+out="$(run_make up P=preset.env)"
+check_missing 'default storage skips the storage override' 'compose.data.yaml' "$out"
+out="$(run_make uninstall CONFIRM=1 P=data.env)"
+check_contains 'host data uninstall stops the container' 'down' "$out"
+check_missing 'host data uninstall keeps the volume' 'down -v' "$out"
+check_contains 'host data uninstall reports the path' "$workdir/data" "$out"
+
+if (cd "$workdir" && make --no-print-directory _data-runtime P=data.env >/dev/null 2>&1); then
+    printf 'ok   host data runtime accepts an existing directory\n'
+else
+    printf 'FAIL host data runtime rejected an existing directory\n' >&2
+    failures=$((failures + 1))
+fi
+out="$(cd "$workdir" && make --no-print-directory _data-runtime P=missing-data.env 2>&1 || true)"
+check_contains 'missing host data is rejected' 'missing data directory' "$out"
+out="$(cd "$workdir" && make --no-print-directory _data-runtime P=relative-data.env 2>&1 || true)"
+check_contains 'relative host data is rejected' 'must be an absolute path' "$out"
 
 # The audio tunnel latency is configurable through the preset.
 out="$(run_make audio-up)"

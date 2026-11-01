@@ -1,0 +1,8 @@
+# Optional override: keep the session data volume on a host directory.
+volumes:
+  game-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: "${VULCAN_DATA_DIR:?set VULCAN_DATA_DIR in the selected env file}"
