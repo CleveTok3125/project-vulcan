@@ -11,7 +11,8 @@ use std::time::{Duration, Instant};
 use vulcan_input_proto::{
     Event, BTN_DPAD_DOWN, BTN_DPAD_LEFT, BTN_DPAD_RIGHT, BTN_DPAD_UP, BTN_EAST, BTN_MISC,
     BTN_MODE, BTN_NORTH, BTN_SELECT, BTN_SOUTH, BTN_START, BTN_TASK, BTN_THUMBL, BTN_THUMBR,
-    BTN_TL, BTN_TR, BTN_WEST, EV_ABS, EV_KEY, EV_REL, EV_SYN, KIND_GAMEPAD, KIND_KEYBOARD,
+    BTN_TL, BTN_TR, BTN_WEST, EV_ABS, EV_KEY, EV_REL, EV_SYN, KIND_GAMEPAD,
+    KIND_GAMEPAD_CONNECT, KIND_GAMEPAD_DISCONNECT, KIND_KEYBOARD,
     KIND_MOUSE, KIND_MOUSE_ABSOLUTE, KIND_PEN, KIND_TOUCH, REL_HWHEEL, REL_WHEEL, REL_X, REL_Y,
     SYN_REPORT,
 };
@@ -188,6 +189,7 @@ struct Backend {
     touches: [*mut ei_touch; touch::MAX_SLOTS],
     tracker: touch::Tracker,
     gamepad: GamepadState,
+    gamepad_dirty: bool,
     gamepad_path: PathBuf,
     gamepad_enabled: bool,
 }
@@ -200,6 +202,10 @@ impl Backend {
                 PathBuf::from("/data/vulcan-gamepad.bin")
             });
         let gamepad_enabled = gamepad_enabled(std::env::var("INPUT_GAMEPAD").ok().as_deref());
+        Self::with_path(gamepad_path, gamepad_enabled)
+    }
+
+    fn with_path(gamepad_path: PathBuf, gamepad_enabled: bool) -> Self {
         let backend = Self {
             context: std::ptr::null_mut(),
             device: std::ptr::null_mut(),
@@ -222,9 +228,11 @@ impl Backend {
                 thumb_ly: 0,
                 thumb_rx: 0,
                 thumb_ry: 0,
-                connected: 1,
+                // The proxy reports a pad only after Apollo creates one.
+                connected: 0,
                 padding: [0; 7],
             },
+            gamepad_dirty: false,
             gamepad_path,
             gamepad_enabled,
         };
@@ -251,9 +259,48 @@ impl Backend {
     }
 
     fn handle_gamepad(&mut self, event: Event) {
-        if apply_gamepad_event(&mut self.gamepad, event) {
-            self.write_gamepad();
+        if event.event_type == EV_SYN && event.code == SYN_REPORT {
+            if self.gamepad_dirty {
+                self.gamepad.connected = 1;
+                self.gamepad.sequence = self.gamepad.sequence.wrapping_add(1);
+                self.gamepad_dirty = false;
+                self.write_gamepad();
+            } else if self.gamepad.connected == 0 {
+                // A lost connect message must not hide the pad forever: the
+                // first report after it reconnects the proxy.
+                self.gamepad.connected = 1;
+                self.gamepad.sequence = self.gamepad.sequence.wrapping_add(1);
+                self.write_gamepad();
+            }
+            return;
         }
+        if apply_gamepad_event(&mut self.gamepad, event) {
+            self.gamepad_dirty = true;
+        }
+    }
+
+    fn set_gamepad_connected(&mut self, connected: bool) {
+        if connected {
+            if self.gamepad.connected != 0 {
+                return;
+            }
+            self.gamepad.connected = 1;
+        } else {
+            if self.gamepad.connected == 0 {
+                return;
+            }
+            self.gamepad.buttons = 0;
+            self.gamepad.left_trigger = 0;
+            self.gamepad.right_trigger = 0;
+            self.gamepad.thumb_lx = 0;
+            self.gamepad.thumb_ly = 0;
+            self.gamepad.thumb_rx = 0;
+            self.gamepad.thumb_ry = 0;
+            self.gamepad.connected = 0;
+            self.gamepad_dirty = false;
+        }
+        self.gamepad.sequence = self.gamepad.sequence.wrapping_add(1);
+        self.write_gamepad();
     }
 
     fn reset(&mut self) {
@@ -491,6 +538,18 @@ impl Backend {
             self.handle_touch(event);
             return;
         }
+        if event.kind == KIND_GAMEPAD_CONNECT {
+            if self.gamepad_enabled {
+                self.set_gamepad_connected(true);
+            }
+            return;
+        }
+        if event.kind == KIND_GAMEPAD_DISCONNECT {
+            if self.gamepad_enabled {
+                self.set_gamepad_connected(false);
+            }
+            return;
+        }
         if event.kind == KIND_GAMEPAD {
             if self.gamepad_enabled {
                 self.handle_gamepad(event);
@@ -605,7 +664,21 @@ impl Backend {
     }
 }
 
+fn gamepad_values(state: &GamepadState) -> (u16, u8, u8, i16, i16, i16, i16) {
+    (
+        state.buttons,
+        state.left_trigger,
+        state.right_trigger,
+        state.thumb_lx,
+        state.thumb_ly,
+        state.thumb_rx,
+        state.thumb_ry,
+    )
+}
+
+/// Applies one event and reports whether it changed the published state.
 fn apply_gamepad_event(state: &mut GamepadState, event: Event) -> bool {
+    let before = gamepad_values(state);
     match event.event_type {
         EV_KEY => {
             if let Some(button) = gamepad_button(event.code) {
@@ -646,14 +719,9 @@ fn apply_gamepad_event(state: &mut GamepadState, event: Event) -> bool {
             }
             _ => {}
         },
-        EV_SYN if event.code == SYN_REPORT => {
-            state.sequence = state.sequence.wrapping_add(1);
-            state.connected = 1;
-            return true;
-        }
         _ => {}
     }
-    false
+    gamepad_values(state) != before
 }
 
 /// The proxy is enabled unless explicitly disabled.
@@ -890,7 +958,7 @@ mod tests {
     #[test]
     fn stick_y_is_inverted_for_xinput() {
         let mut state = test_state();
-        assert!(!apply_gamepad_event(
+        assert!(apply_gamepad_event(
             &mut state,
             Event {
                 kind: KIND_GAMEPAD,
@@ -910,6 +978,117 @@ mod tests {
             },
         );
         assert_eq!(state.thumb_ry, 500);
+    }
+
+    #[test]
+    fn repeated_gamepad_values_do_not_count_as_changes() {
+        let mut state = test_state();
+        let axis = Event {
+            kind: KIND_GAMEPAD,
+            event_type: EV_ABS,
+            code: vulcan_input_proto::ABS_X,
+            value: 1000,
+        };
+        assert!(apply_gamepad_event(&mut state, axis));
+        assert!(!apply_gamepad_event(&mut state, axis));
+        assert!(!apply_gamepad_event(&mut state, axis));
+    }
+
+    #[test]
+    fn gamepad_buttons_report_press_and_release() {
+        let mut state = test_state();
+        let press = Event {
+            kind: KIND_GAMEPAD,
+            event_type: EV_KEY,
+            code: BTN_SOUTH,
+            value: 1,
+        };
+        let release = Event { value: 0, ..press };
+        assert!(apply_gamepad_event(&mut state, press));
+        assert!(!apply_gamepad_event(&mut state, press));
+        assert_eq!(state.buttons, 0x1000);
+        assert!(apply_gamepad_event(&mut state, release));
+        assert_eq!(state.buttons, 0);
+    }
+
+    fn gamepad_event(kind: u8, event_type: u16, code: u16, value: i32) -> Event {
+        Event {
+            kind,
+            event_type,
+            code,
+            value,
+        }
+    }
+
+    fn read_gamepad(path: &std::path::Path) -> GamepadState {
+        let bytes = std::fs::read(path).unwrap();
+        assert_eq!(bytes.len(), std::mem::size_of::<GamepadState>());
+        unsafe { std::ptr::read_unaligned(bytes.as_ptr().cast::<GamepadState>()) }
+    }
+
+    fn test_backend(name: &str) -> (Backend, std::path::PathBuf) {
+        let directory =
+            std::env::temp_dir().join(format!("vulcan-gamepad-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("pad.bin");
+        (Backend::with_path(path.clone(), true), path)
+    }
+
+    #[test]
+    fn gamepad_file_is_rewritten_only_when_the_state_changes() {
+        use std::os::unix::fs::MetadataExt;
+
+        let (mut backend, path) = test_backend("writes");
+        let axis = gamepad_event(KIND_GAMEPAD, EV_ABS, vulcan_input_proto::ABS_X, 1000);
+        backend.handle(axis);
+        backend.handle(gamepad_event(KIND_GAMEPAD, EV_SYN, SYN_REPORT, 0));
+        let first = std::fs::metadata(&path).unwrap().ino();
+        assert_eq!(read_gamepad(&path).thumb_lx, 1000);
+
+        backend.handle(axis);
+        backend.handle(gamepad_event(KIND_GAMEPAD, EV_SYN, SYN_REPORT, 0));
+        assert_eq!(std::fs::metadata(&path).unwrap().ino(), first);
+
+        backend.handle(gamepad_event(
+            KIND_GAMEPAD,
+            EV_ABS,
+            vulcan_input_proto::ABS_X,
+            2000,
+        ));
+        backend.handle(gamepad_event(KIND_GAMEPAD, EV_SYN, SYN_REPORT, 0));
+        let second = std::fs::metadata(&path).unwrap().ino();
+        assert_ne!(second, first);
+        assert_eq!(read_gamepad(&path).thumb_lx, 2000);
+
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn gamepad_connection_events_toggle_the_proxy() {
+        let (mut backend, path) = test_backend("connect");
+        assert_eq!(read_gamepad(&path).connected, 0);
+
+        backend.handle(gamepad_event(KIND_GAMEPAD_CONNECT, 0, 0, 0));
+        let connected = read_gamepad(&path);
+        assert_eq!(connected.connected, 1);
+
+        backend.handle(gamepad_event(
+            KIND_GAMEPAD,
+            EV_ABS,
+            vulcan_input_proto::ABS_X,
+            500,
+        ));
+        backend.handle(gamepad_event(KIND_GAMEPAD, EV_SYN, SYN_REPORT, 0));
+        assert_eq!(read_gamepad(&path).thumb_lx, 500);
+
+        backend.handle(gamepad_event(KIND_GAMEPAD_DISCONNECT, 0, 0, 0));
+        let disconnected = read_gamepad(&path);
+        assert_eq!(disconnected.connected, 0);
+        assert_eq!(disconnected.thumb_lx, 0);
+        assert_eq!(disconnected.buttons, 0);
+
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
 
     #[test]

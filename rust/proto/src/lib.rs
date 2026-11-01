@@ -7,6 +7,10 @@ pub const KIND_MOUSE_ABSOLUTE: u8 = 3;
 pub const KIND_TOUCH: u8 = 4;
 pub const KIND_PEN: u8 = 5;
 pub const KIND_GAMEPAD: u8 = 6;
+/// Apollo created a virtual gamepad; the proxy should report it connected.
+pub const KIND_GAMEPAD_CONNECT: u8 = 7;
+/// Apollo removed the virtual gamepad; the proxy should report it absent.
+pub const KIND_GAMEPAD_DISCONNECT: u8 = 8;
 
 pub const EV_SYN: u16 = 0;
 pub const EV_KEY: u16 = 1;
@@ -118,5 +122,18 @@ mod tests {
             value: 1234,
         };
         assert_eq!(Event::from_bytes(&event.to_bytes()), event);
+    }
+
+    #[test]
+    fn gamepad_connection_events_roundtrip() {
+        for kind in [KIND_GAMEPAD_CONNECT, KIND_GAMEPAD_DISCONNECT] {
+            let event = Event {
+                kind,
+                event_type: 0,
+                code: 0,
+                value: 0,
+            };
+            assert_eq!(Event::from_bytes(&event.to_bytes()), event);
+        }
     }
 }

@@ -5,7 +5,8 @@ use std::os::unix::net::UnixStream;
 use std::sync::{Mutex, OnceLock};
 
 use vulcan_input_proto::{
-    Event, BTN_MISC, BTN_TASK, EV_ABS, EV_KEY, EV_REL, EV_SYN, KIND_GAMEPAD, KIND_KEYBOARD,
+    Event, BTN_MISC, BTN_TASK, EV_ABS, EV_KEY, EV_REL, EV_SYN, KIND_GAMEPAD,
+    KIND_GAMEPAD_CONNECT, KIND_GAMEPAD_DISCONNECT, KIND_KEYBOARD,
     KIND_MOUSE, KIND_MOUSE_ABSOLUTE, KIND_PASSTHROUGH, KIND_PEN, KIND_TOUCH, ABS_MT_POSITION_X,
     ABS_MT_POSITION_Y, ABS_X, ABS_Y, REL_HWHEEL, REL_WHEEL, REL_X, REL_Y, SYN_REPORT, TOUCH_RANGE,
 };
@@ -303,6 +304,14 @@ pub unsafe extern "C" fn libevdev_uinput_create_from_device(
         register_fake(raw);
         *uidev = raw;
     }
+    if kind == KIND_GAMEPAD {
+        send_event(Event {
+            kind: KIND_GAMEPAD_CONNECT,
+            event_type: 0,
+            code: 0,
+            value: 0,
+        });
+    }
     0
 }
 
@@ -321,6 +330,14 @@ pub unsafe extern "C" fn libevdev_uinput_destroy(uidev: *mut libevdev_uinput) {
     }
 
     let fake = Box::from_raw(uidev as *mut Fake);
+    if fake.kind == KIND_GAMEPAD && fake.real.is_null() {
+        send_event(Event {
+            kind: KIND_GAMEPAD_DISCONNECT,
+            event_type: 0,
+            code: 0,
+            value: 0,
+        });
+    }
     if !fake.real.is_null() {
         if let Some(real) = real() {
             (real.destroy)(fake.real);
