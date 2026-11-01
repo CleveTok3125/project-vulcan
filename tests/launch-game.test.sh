@@ -271,15 +271,55 @@ check 'rumble directory symlink installed' "$workdir/rumble" \
 check 'xinput override enabled' 'yes' \
     "$(grep -q 'xinput1_4' "$wine_log" && printf yes || printf no)"
 
+# The DirectInput proxy installs for every gamepad session.
+mkdir -p "$fake_root/lib/wine/x86_64-windows" "$fake_root/lib/wine/i386-windows"
+printf 'real64' >"$fake_root/lib/wine/x86_64-windows/dinput8.dll"
+printf 'real32' >"$fake_root/lib/wine/i386-windows/dinput8.dll"
+dinput_dll="$workdir/dinput8.dll"
+dinput_dll_32="$workdir/dinput8_32.dll"
+printf 'proxy64' >"$dinput_dll"
+printf 'proxy32' >"$dinput_dll_32"
 rm -rf "$workdir/prefix/test"
 : >"$wine_log"
-run_launch test INPUT_GAMEPAD=0 XINPUT_DLL="$xinput_dll" 2>"$workdir/gamepad-off.log"
+run_launch test XINPUT_DLL="$xinput_dll" \
+    DINPUT_DLL="$dinput_dll" DINPUT_DLL_32="$dinput_dll_32" \
+    2>"$workdir/dinput.log"
+check 'dinput proxy installed' 'proxy64' \
+    "$(cat "$workdir/prefix/test/drive_c/windows/system32/dinput8.dll" 2>/dev/null || true)"
+check 'dinput real DLL preserved' 'real64' \
+    "$(cat "$workdir/prefix/test/drive_c/windows/system32/dinput8_real.dll" 2>/dev/null || true)"
+check '32-bit dinput proxy installed' 'proxy32' \
+    "$(cat "$workdir/prefix/test/drive_c/windows/syswow64/dinput8.dll" 2>/dev/null || true)"
+check '32-bit dinput real DLL preserved' 'real32' \
+    "$(cat "$workdir/prefix/test/drive_c/windows/syswow64/dinput8_real.dll" 2>/dev/null || true)"
+check 'dinput override enabled' 'yes' \
+    "$(grep -q 'dinput8=n,b' "$wine_log" && printf yes || printf no)"
+
+rm -rf "$workdir/prefix/test"
+: >"$wine_log"
+run_launch test XINPUT_DLL="$xinput_dll" DINPUT_PROXY=0 \
+    DINPUT_DLL="$dinput_dll" DINPUT_DLL_32="$dinput_dll_32" \
+    2>"$workdir/dinput-off.log"
+check 'dinput proxy skipped when disabled' 'no' \
+    "$([ -f "$workdir/prefix/test/drive_c/windows/system32/dinput8.dll" ] && printf yes || printf no)"
+check 'dinput override skipped when disabled' 'no' \
+    "$(grep -q 'dinput8=n,b' "$wine_log" && printf yes || printf no)"
+
+rm -rf "$workdir/prefix/test"
+: >"$wine_log"
+run_launch test INPUT_GAMEPAD=0 XINPUT_DLL="$xinput_dll" \
+    DINPUT_DLL="$dinput_dll" DINPUT_DLL_32="$dinput_dll_32" \
+    2>"$workdir/gamepad-off.log"
 check 'xinput proxy skipped when disabled' 'no' \
     "$([ -f "$workdir/prefix/test/drive_c/windows/system32/xinput1_4.dll" ] && printf yes || printf no)"
+check 'dinput proxy skipped when gamepad disabled' 'no' \
+    "$([ -f "$workdir/prefix/test/drive_c/windows/system32/dinput8.dll" ] && printf yes || printf no)"
 check 'rumble symlink skipped when disabled' 'no' \
     "$([ -L "$workdir/prefix/test/drive_c/vulcan-data" ] && printf yes || printf no)"
 check 'xinput override skipped when disabled' 'no' \
     "$(grep -q 'xinput1_4' "$wine_log" && printf yes || printf no)"
+check 'dinput override skipped when gamepad disabled' 'no' \
+    "$(grep -q 'dinput8=n,b' "$wine_log" && printf yes || printf no)"
 
 # A custom rumble directory is linked for the session.
 rm -rf "$workdir/prefix/test"

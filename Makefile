@@ -378,6 +378,13 @@ check-xinput: base ## [global] Run the XInput proxy tests in a build stage
 		--target xinput-test \
 		--output type=cacheonly .
 
+check-dinput: base ## [global] Run the DirectInput proxy tests in a build stage
+	docker build -f Dockerfile \
+		--build-arg BASE_IMAGE="$(BASE_IMAGE)" \
+		--build-arg DINPUT_RUNTIME_TEST=1 \
+		--target dinput-test \
+		--output type=cacheonly .
+
 ports: _check-presets ## [presets] Show the Apollo ports for every listed preset
 	@scripts/show-ports.sh $(P_LIST)
 

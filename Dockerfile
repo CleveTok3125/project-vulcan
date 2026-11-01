@@ -74,6 +74,26 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
         -o /out/x86_64/probe.exe /src/xinput_probe.c \
     && i686-w64-mingw32-gcc -O2 -Wall -Wextra -Werror \
         -o /out/i686/probe.exe /src/xinput_probe.c \
+    && x86_64-w64-mingw32-g++ -shared -O2 -Wall -Wextra -Werror \
+        -fno-exceptions -fno-rtti -static -static-libgcc -static-libstdc++ \
+        -o /out/x86_64/dinput8.dll \
+        /src/dinput8.cpp /src/dinput8.def \
+        -ldxguid -luuid \
+        -Wl,--no-insert-timestamp \
+    && i686-w64-mingw32-g++ -shared -O2 -Wall -Wextra -Werror \
+        -fno-exceptions -fno-rtti -static -static-libgcc -static-libstdc++ \
+        -o /out/i686/dinput8.dll \
+        /src/dinput8.cpp /src/dinput8.def \
+        -ldxguid -luuid \
+        -Wl,--no-insert-timestamp \
+    && x86_64-w64-mingw32-g++ -O2 -Wall -Wextra -Werror \
+        -fno-exceptions -fno-rtti -static -static-libgcc -static-libstdc++ \
+        -o /out/x86_64/dinput_probe.exe /src/dinput_probe.cpp \
+        -ldinput8 -ldxguid -luuid \
+    && i686-w64-mingw32-g++ -O2 -Wall -Wextra -Werror \
+        -fno-exceptions -fno-rtti -static -static-libgcc -static-libstdc++ \
+        -o /out/i686/dinput_probe.exe /src/dinput_probe.cpp \
+        -ldinput8 -ldxguid -luuid \
     && for arch in x86_64 i686; do \
         objdump="${arch}-w64-mingw32-objdump"; \
         "$objdump" -p "/out/${arch}/xinput1_4.dll" > "/tmp/${arch}-exports.txt"; \
@@ -93,6 +113,12 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
         sed -n 's/.*[+]base\[ *108\] *[0-9]* *//p' "/tmp/${arch}-exports.txt" \
             | grep -qx 'XInputGetCapabilitiesEx' \
             || { printf 'ordinal 108 is not XInputGetCapabilitiesEx for %s\n' "$arch" >&2; exit 1; }; \
+        "$objdump" -p "/out/${arch}/dinput8.dll" > "/tmp/${arch}-dinput-exports.txt"; \
+        for name in DirectInput8Create DllCanUnloadNow DllGetClassObject \
+                    DllRegisterServer DllUnregisterServer; do \
+            grep -q "$name" "/tmp/${arch}-dinput-exports.txt" \
+                || { printf 'missing DirectInput export %s for %s\n' "$name" "$arch" >&2; exit 1; }; \
+        done; \
     done
 
 # wbg draws the wallpaper without gdk-pixbuf, so no image loader is spawned
@@ -156,6 +182,31 @@ RUN if [ "$XINPUT_RUNTIME_TEST" != "1" ]; then \
         done; \
     fi
 
+# Runs the DirectInput proxy probe under Wine. The proxy is installed in a
+# fresh prefix with the Wine builtin preserved as dinput8_real.dll.
+FROM ${BASE_IMAGE} AS dinput-test
+
+COPY --from=native-builder /out /out
+ARG DINPUT_RUNTIME_TEST=0
+
+RUN if [ "$DINPUT_RUNTIME_TEST" != "1" ]; then \
+        printf '%s\n' 'dinput runtime tests skipped'; \
+    else \
+        command -v wine >/dev/null 2>&1 \
+            || { printf '%s\n' 'wine is required for the dinput runtime tests' >&2; exit 1; }; \
+        export WINEDEBUG=-all DISPLAY= XDG_RUNTIME_DIR=/tmp \
+            WINEPREFIX=/tmp/wine-dinput WINEDLLOVERRIDES='dinput8=n'; \
+        wineboot --init; \
+        sys32="$WINEPREFIX/drive_c/windows/system32"; \
+        syswow="$WINEPREFIX/drive_c/windows/syswow64"; \
+        cp "$sys32/dinput8.dll" "$sys32/dinput8_real.dll"; \
+        cp /out/x86_64/dinput8.dll "$sys32/dinput8.dll"; \
+        wine /out/x86_64/dinput_probe.exe || exit 1; \
+        cp "$syswow/dinput8.dll" "$syswow/dinput8_real.dll"; \
+        cp /out/i686/dinput8.dll "$syswow/dinput8.dll"; \
+        wine /out/i686/dinput_probe.exe || exit 1; \
+    fi
+
 FROM ${BASE_IMAGE} AS vkcapture-builder
 
 # Build only the capture sender. The OBS plugin belongs to the host OBS
@@ -180,6 +231,8 @@ RUN pacman -U --noconfirm /tmp/apollo/*.pkg.tar.zst && rm -rf /tmp/apollo
 
 COPY --from=native-builder /out/x86_64/xinput1_4.dll /usr/lib/vulcan/xinput1_4.dll
 COPY --from=native-builder /out/i686/xinput1_4.dll /usr/lib/vulcan/xinput1_4_32.dll
+COPY --from=native-builder /out/x86_64/dinput8.dll /usr/lib/vulcan/dinput8.dll
+COPY --from=native-builder /out/i686/dinput8.dll /usr/lib/vulcan/dinput8_32.dll
 COPY --from=wbg-builder /out/wbg /usr/local/bin/wbg
 
 COPY --from=rust-builder /build/target/release/libvulcan_uinput_shim.so /usr/lib/libvulcan_uinput_shim.so
@@ -203,6 +256,8 @@ RUN chmod 0755 \
     && chmod 0644 \
         /usr/lib/vulcan/xinput1_4.dll \
         /usr/lib/vulcan/xinput1_4_32.dll \
+        /usr/lib/vulcan/dinput8.dll \
+        /usr/lib/vulcan/dinput8_32.dll \
         /config/sway/config.in \
         /config/apollo/* \
         /usr/share/vulcan/wallpaper.png \

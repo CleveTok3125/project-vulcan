@@ -179,6 +179,9 @@ fi
 
 XINPUT_DLL="${XINPUT_DLL:-/usr/lib/vulcan/xinput1_4.dll}"
 XINPUT_DLL_32="${XINPUT_DLL_32:-/usr/lib/vulcan/xinput1_4_32.dll}"
+DINPUT_DLL="${DINPUT_DLL:-/usr/lib/vulcan/dinput8.dll}"
+DINPUT_DLL_32="${DINPUT_DLL_32:-/usr/lib/vulcan/dinput8_32.dll}"
+DINPUT_PROXY="${DINPUT_PROXY:-1}"
 if [ "$INPUT_GAMEPAD" = "1" ]; then
     if [ "$WINEARCH" = "win32" ]; then
         # A 32-bit prefix stores 32-bit modules in system32.
@@ -206,6 +209,51 @@ if [ "$INPUT_GAMEPAD" = "1" ]; then
             for dll in xinput1_4.dll xinput1_3.dll xinput9_1_0.dll; do
                 install -m 0644 "$XINPUT_DLL_32" "$WINEPREFIX/drive_c/windows/syswow64/$dll"
             done
+        fi
+    fi
+    if [ "$DINPUT_PROXY" = "1" ]; then
+        dinput_real_64="$WINEPREFIX/drive_c/windows/system32/dinput8_real.dll"
+        dinput_real_32="$WINEPREFIX/drive_c/windows/syswow64/dinput8_real.dll"
+        dinput_real_source_64="$WINE_ROOT/lib/wine/x86_64-windows/dinput8.dll"
+        dinput_real_source_32="$WINE_ROOT/lib/wine/i386-windows/dinput8.dll"
+        dinput_installed=0
+
+        if [ "$WINEARCH" = "win32" ]; then
+            dinput_real_32="$WINEPREFIX/drive_c/windows/system32/dinput8_real.dll"
+            if [ ! -f "$dinput_real_32" ] && [ -f "$dinput_real_source_32" ]; then
+                install -m 0644 "$dinput_real_source_32" "$dinput_real_32"
+            fi
+            if [ -f "$DINPUT_DLL_32" ]; then
+                install -m 0644 "$DINPUT_DLL_32" "$WINEPREFIX/drive_c/windows/system32/dinput8.dll"
+                dinput_installed=1
+            else
+                printf '[vulcan] 32-bit DirectInput proxy not found: %s\n' "$DINPUT_DLL_32" >&2
+            fi
+        else
+            if [ ! -f "$dinput_real_64" ] && [ -f "$dinput_real_source_64" ]; then
+                install -m 0644 "$dinput_real_source_64" "$dinput_real_64"
+            fi
+            if [ -f "$DINPUT_DLL" ]; then
+                install -m 0644 "$DINPUT_DLL" "$WINEPREFIX/drive_c/windows/system32/dinput8.dll"
+                dinput_installed=1
+            else
+                printf '[vulcan] DirectInput proxy not found: %s\n' "$DINPUT_DLL" >&2
+            fi
+            if [ ! -f "$DINPUT_DLL_32" ]; then
+                printf '[vulcan] 32-bit DirectInput proxy not found: %s\n' "$DINPUT_DLL_32" >&2
+            elif [ ! -d "$WINEPREFIX/drive_c/windows/syswow64" ]; then
+                printf '[vulcan] prefix has no syswow64; 32-bit DirectInput proxy not installed\n' >&2
+            else
+                if [ ! -f "$dinput_real_32" ] && [ -f "$dinput_real_source_32" ]; then
+                    install -m 0644 "$dinput_real_source_32" "$dinput_real_32"
+                fi
+                install -m 0644 "$DINPUT_DLL_32" "$WINEPREFIX/drive_c/windows/syswow64/dinput8.dll"
+                dinput_installed=1
+            fi
+        fi
+
+        if [ "$dinput_installed" = "1" ]; then
+            WINEDLLOVERRIDES="${WINEDLLOVERRIDES};dinput8=n,b"
         fi
     fi
     ln -sfn "${VULCAN_GAMEPAD_STATE:-/data/vulcan-gamepad.bin}" \

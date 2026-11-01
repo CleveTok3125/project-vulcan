@@ -755,9 +755,9 @@ handing it to Sway.
 
 ```text
 Apollo gamepad -> shim -> vulcan-inputd -> vulcan-gamepad.bin
-              -> xinput1_4.dll (Wine prefix) -> game
+              -> xinput1_4.dll / dinput8.dll (Wine prefix) -> game
 
-game vibration -> xinput1_4.dll -> vulcan-rumble.bin
+game vibration -> xinput1_4.dll or dinput8.dll -> vulcan-rumble.bin
                -> Apollo -> Moonlight client -> controller
 ```
 
@@ -770,16 +770,21 @@ only one game runs at a time.
 The input socket is `/run/user/1000/vulcan-input.sock`; `/run` is a tmpfs, so
 the socket exists only while the container runs.
 
-`launch-game.sh` installs the native XInput DLL for both architectures and
-sets `WINEDLLOVERRIDES`. The 64-bit DLL goes to
-`drive_c/windows/system32`, the 32-bit DLL to `drive_c/windows/syswow64`,
+`launch-game.sh` installs the native XInput and DirectInput DLLs for both
+architectures and sets `WINEDLLOVERRIDES`. The 64-bit DLLs go to
+`drive_c/windows/system32`, the 32-bit DLLs to `drive_c/windows/syswow64`,
 because a 32-bit process resolves `system32` to `syswow64`. Set
 `INPUT_GAMEPAD=0` to skip the pad state file, the rumble link, and the DLLs.
-Games that use DirectInput or raw HID instead of XInput do not see a
-controller.
 
-The proxy reports the pad only after Apollo creates the virtual gamepad for
-the streaming client, so a client without a controller sees no XInput
+The DirectInput proxy presents one virtual joystick named
+`Controller (XBOX 360 For Windows)` and reads the same state file. It is
+installed for every gamepad-enabled session; set `DINPUT_PROXY=0` to skip it.
+The proxy keeps the Wine builtin as `dinput8_real.dll` and forwards
+keyboard, mouse, and other non-virtual calls to it. Raw HID devices are still
+not exposed.
+
+The XInput proxy reports the pad only after Apollo creates the virtual gamepad
+for the streaming client, so a client without a controller sees no XInput
 device. The guide button is reported only through the undocumented ordinal
 100, which SDL and most overlays use; the documented `XInputGetState` masks
 it out and `XInputGetCapabilities` keeps the real-hardware mask `0xF3FF`.
@@ -795,8 +800,10 @@ process to exit, runs `wineserver -k` and terminates leftover `winedevice`
 processes so Wine services and gamescope stop, and clears the record and lock
 again after the wrapper exits.
 
-Only the two grip motors are supported. Trigger rumble, gyroscope, adaptive
-triggers, and the RGB LED are not part of `XInputSetState` and stay
+DirectInput force feedback uses the same record. Constant, ramp, periodic,
+custom, and condition effects are mapped to the two grip motors, including
+gain, duration, start delay, and envelope. Only the two grip motors are
+supported. Trigger rumble, gyroscope, adaptive triggers, and the RGB LED stay
 unavailable. Only the first allocated pad drives rumble; a second client
 controller does not get a separate stream.
 
