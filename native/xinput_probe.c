@@ -13,7 +13,11 @@
 #include <string.h>
 
 #define STATE_PATH "C:\\vulcan-gamepad.bin"
+#define RUMBLE_DIR "C:\\vulcan-data"
+#define RUMBLE_PATH "C:\\vulcan-data\\vulcan-rumble.bin"
+#define RUMBLE_LOCK "C:\\vulcan-data\\vulcan-rumble.lock"
 #define VULCAN_GAMEPAD_MAGIC 0x56475031u
+#define VULCAN_RUMBLE_MAGIC 0x5647524Du
 #define VULCAN_BUTTONS_MASK 0xF3FFu
 
 typedef struct {
@@ -29,6 +33,16 @@ typedef struct {
     uint8_t connected;
     uint8_t padding[7];
 } vulcan_gamepad_state_t;
+
+typedef struct {
+    uint32_t magic;
+    uint32_t sequence;
+    uint16_t left;
+    uint16_t right;
+    uint32_t reserved;
+} vulcan_rumble_t;
+
+_Static_assert(sizeof(vulcan_rumble_t) == 16, "unexpected rumble record size");
 
 typedef DWORD(WINAPI *get_state_fn)(DWORD, XINPUT_STATE *);
 typedef DWORD(WINAPI *set_state_fn)(DWORD, XINPUT_VIBRATION *);
@@ -97,6 +111,37 @@ static void write_state(uint8_t connected) {
     }
 }
 
+static void create_rumble_dir(void) {
+    if (!CreateDirectoryA(RUMBLE_DIR, NULL) && GetLastError() != ERROR_ALREADY_EXISTS) {
+        printf("FAIL cannot create rumble directory\n");
+        failures++;
+    }
+}
+
+static int read_rumble(vulcan_rumble_t *record) {
+    HANDLE file;
+    DWORD read = 0;
+    int ok;
+
+    memset(record, 0, sizeof(*record));
+    file = CreateFileA(
+        RUMBLE_PATH,
+        GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        NULL,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL
+    );
+    if (file == INVALID_HANDLE_VALUE) {
+        return 0;
+    }
+    ok = ReadFile(file, record, sizeof(*record), &read, NULL)
+        && read == (DWORD)sizeof(*record);
+    CloseHandle(file);
+    return ok;
+}
+
 /* GetProcAddress returns FARPROC; copy it instead of casting between
  * incompatible function pointer types. */
 static int load_symbol(HMODULE module, LPCSTR name, void *target, size_t size) {
@@ -116,6 +161,7 @@ int main(void) {
     XINPUT_BATTERY_INFORMATION battery;
     XINPUT_KEYSTROKE keystroke;
     XINPUT_VIBRATION vibration;
+    vulcan_rumble_t rumble;
     DWORD result;
     int loaded;
 
@@ -198,8 +244,50 @@ int main(void) {
               capabilities_ex.Capabilities.Gamepad.wButtons == VULCAN_BUTTONS_MASK);
     }
 
+    create_rumble_dir();
+    DeleteFileA(RUMBLE_PATH);
+    DeleteFileA(RUMBLE_LOCK);
+
     memset(&vibration, 0, sizeof(vibration));
     check("set state succeeds", p_set_state(0, &vibration) == ERROR_SUCCESS);
+    check("first rumble record is written",
+          read_rumble(&rumble) && rumble.magic == VULCAN_RUMBLE_MAGIC);
+    check("first rumble record has sequence 1", rumble.sequence == 1);
+    check("rumble lock is held",
+          GetFileAttributesA(RUMBLE_LOCK) != INVALID_FILE_ATTRIBUTES);
+    check("zero rumble is recorded", rumble.left == 0 && rumble.right == 0);
+
+    vibration.wLeftMotorSpeed = 1234;
+    vibration.wRightMotorSpeed = 5678;
+    check("non-zero rumble succeeds", p_set_state(0, &vibration) == ERROR_SUCCESS);
+    memset(&rumble, 0, sizeof(rumble));
+    check("non-zero rumble is recorded",
+          read_rumble(&rumble) && rumble.left == 1234 && rumble.right == 5678);
+    check("rumble sequence advances", rumble.sequence == 2);
+
+    check("duplicate rumble succeeds", p_set_state(0, &vibration) == ERROR_SUCCESS);
+    memset(&rumble, 0, sizeof(rumble));
+    check("duplicate rumble does not advance the sequence",
+          read_rumble(&rumble) && rumble.sequence == 2);
+
+    DeleteFileA(RUMBLE_PATH);
+    check("missing rumble record is rewritten",
+          p_set_state(0, &vibration) == ERROR_SUCCESS);
+    memset(&rumble, 0, sizeof(rumble));
+    check("rewritten rumble keeps the values",
+          read_rumble(&rumble) && rumble.left == 1234 && rumble.right == 5678);
+    check("rewritten rumble advances the sequence", rumble.sequence == 3);
+
+    vibration.wLeftMotorSpeed = 0;
+    vibration.wRightMotorSpeed = 0;
+    check("stop rumble succeeds", p_set_state(0, &vibration) == ERROR_SUCCESS);
+    memset(&rumble, 0, sizeof(rumble));
+    check("stop rumble is recorded",
+          read_rumble(&rumble) && rumble.left == 0 && rumble.right == 0);
+    check("stop rumble advances the sequence", rumble.sequence == 4);
+
+    check("null rumble is rejected", p_set_state(0, NULL) == ERROR_DEVICE_NOT_CONNECTED);
+    check("another pad rumble is rejected", p_set_state(1, &vibration) == ERROR_DEVICE_NOT_CONNECTED);
 
     p_enable(FALSE);
     memset(&state, 0, sizeof(state));
@@ -218,9 +306,20 @@ int main(void) {
           p_get_state(0, &state) == ERROR_DEVICE_NOT_CONNECTED);
     check("disconnected capabilities are not connected",
           p_get_capabilities(0, 0, &capabilities) == ERROR_DEVICE_NOT_CONNECTED);
+    vibration.wLeftMotorSpeed = 65535;
+    vibration.wRightMotorSpeed = 65535;
+    check("disconnected rumble is rejected",
+          p_set_state(0, &vibration) == ERROR_DEVICE_NOT_CONNECTED);
+    memset(&rumble, 0, sizeof(rumble));
+    check("disconnected rumble is not recorded",
+          read_rumble(&rumble) && rumble.sequence == 4);
 
     DeleteFileA(STATE_PATH);
+    DeleteFileA(RUMBLE_PATH);
     FreeLibrary(module);
+    check("rumble lock is released",
+          GetFileAttributesA(RUMBLE_LOCK) == INVALID_FILE_ATTRIBUTES);
+    RemoveDirectoryA(RUMBLE_DIR);
 
     if (failures != 0) {
         printf("%d checks failed\n", failures);
