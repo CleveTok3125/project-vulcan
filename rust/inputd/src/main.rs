@@ -228,7 +228,7 @@ impl Backend {
                 thumb_ly: 0,
                 thumb_rx: 0,
                 thumb_ry: 0,
-                // The proxy reports a pad only after Apollo creates one.
+                // The proxy stays attached; connected marks client pad data.
                 connected: 0,
                 padding: [0; 7],
             },

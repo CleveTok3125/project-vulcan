@@ -7,9 +7,9 @@ pub const KIND_MOUSE_ABSOLUTE: u8 = 3;
 pub const KIND_TOUCH: u8 = 4;
 pub const KIND_PEN: u8 = 5;
 pub const KIND_GAMEPAD: u8 = 6;
-/// Apollo created a virtual gamepad; the proxy should report it connected.
+/// Apollo created a virtual gamepad; the proxy may report its input.
 pub const KIND_GAMEPAD_CONNECT: u8 = 7;
-/// Apollo removed the virtual gamepad; the proxy should report it absent.
+/// Apollo removed the virtual gamepad; the proxy reports a neutral state.
 pub const KIND_GAMEPAD_DISCONNECT: u8 = 8;
 
 pub const EV_SYN: u16 = 0;

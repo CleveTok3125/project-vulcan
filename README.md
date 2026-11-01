@@ -778,11 +778,15 @@ because a 32-bit process resolves `system32` to `syswow64`. Set
 Games that use DirectInput or raw HID instead of XInput do not see a
 controller.
 
-The proxy reports the pad only after Apollo creates the virtual gamepad for
-the streaming client, so a client without a controller sees no XInput
-device. The guide button is reported only through the undocumented ordinal
-100, which SDL and most overlays use; the documented `XInputGetState` masks
-it out and `XInputGetCapabilities` keeps the real-hardware mask `0xF3FF`.
+The proxy exposes the virtual pad at slot 0 from process start, so games
+that enumerate XInput once at startup still find it before the client sends
+its first report. Until `vulcan-inputd` marks the pad connected, the state is
+neutral; a client without a controller therefore still sees a pad at rest,
+and games may show controller prompts until a real pad or keyboard/mouse
+input arrives. The guide button is reported only through the undocumented
+ordinal 100, which SDL and most overlays use; the documented
+`XInputGetState` masks it out and `XInputGetCapabilities` keeps the
+real-hardware mask `0xF3FF`.
 Vibration is forwarded to the client. `XInputSetState` writes both motor
 speeds to `C:\vulcan-data\vulcan-rumble.bin`, which is the session's
 `/data/vulcan-rumble.bin`; the Apollo build reads that file and sends the

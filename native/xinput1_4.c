@@ -68,7 +68,8 @@ static uint16_t rumble_right = 0;
 static int rumble_initialized = 0;
 static HANDLE rumble_guard = INVALID_HANDLE_VALUE;
 
-/* Reports whether the daemon published a connected pad state. */
+/* Reads the daemon state. Reports whether the file holds a valid record; a
+ * valid record with connected == 0 means the client pad has no data yet. */
 static int read_state(vulcan_gamepad_state_t *state) {
     HANDLE file;
     DWORD read = 0;
@@ -90,7 +91,7 @@ static int read_state(vulcan_gamepad_state_t *state) {
         memset(state, 0, sizeof(*state));
     }
     CloseHandle(file);
-    return state->magic == VULCAN_GAMEPAD_MAGIC && state->connected != 0;
+    return state->magic == VULCAN_GAMEPAD_MAGIC;
 }
 
 /*
@@ -185,21 +186,24 @@ static DWORD fill_state(DWORD index, XINPUT_STATE *state, WORD buttons_mask) {
     if (index != 0 || state == NULL) {
         return ERROR_DEVICE_NOT_CONNECTED;
     }
-    if (!read_state(&raw)) {
-        return ERROR_DEVICE_NOT_CONNECTED;
-    }
-
     memset(state, 0, sizeof(*state));
-    state->dwPacketNumber = raw.sequence;
-    if (xinput_enabled != 0) {
-        state->Gamepad.wButtons = raw.buttons & buttons_mask;
-        state->Gamepad.bLeftTrigger = raw.left_trigger;
-        state->Gamepad.bRightTrigger = raw.right_trigger;
-        state->Gamepad.sThumbLX = raw.thumb_lx;
-        state->Gamepad.sThumbLY = raw.thumb_ly;
-        state->Gamepad.sThumbRX = raw.thumb_rx;
-        state->Gamepad.sThumbRY = raw.thumb_ry;
+    /* The virtual pad stays attached for the whole session. Games that
+     * enumerate XInput once at startup must see it before the client
+     * publishes the first pad report. */
+    if (!read_state(&raw)) {
+        return ERROR_SUCCESS;
     }
+    state->dwPacketNumber = raw.sequence;
+    if (raw.connected == 0 || xinput_enabled == 0) {
+        return ERROR_SUCCESS;
+    }
+    state->Gamepad.wButtons = raw.buttons & buttons_mask;
+    state->Gamepad.bLeftTrigger = raw.left_trigger;
+    state->Gamepad.bRightTrigger = raw.right_trigger;
+    state->Gamepad.sThumbLX = raw.thumb_lx;
+    state->Gamepad.sThumbLY = raw.thumb_ly;
+    state->Gamepad.sThumbRX = raw.thumb_rx;
+    state->Gamepad.sThumbRY = raw.thumb_ry;
     return ERROR_SUCCESS;
 }
 
@@ -221,12 +225,7 @@ DWORD WINAPI XInputGetState(DWORD index, XINPUT_STATE *state) {
 
 /* Vibration is recorded for the session to forward to the streaming client. */
 DWORD WINAPI XInputSetState(DWORD index, XINPUT_VIBRATION *vibration) {
-    vulcan_gamepad_state_t raw;
-
     if (index != 0 || vibration == NULL) {
-        return ERROR_DEVICE_NOT_CONNECTED;
-    }
-    if (!read_state(&raw)) {
         return ERROR_DEVICE_NOT_CONNECTED;
     }
 
@@ -237,13 +236,8 @@ DWORD WINAPI XInputSetState(DWORD index, XINPUT_VIBRATION *vibration) {
 }
 
 DWORD WINAPI XInputGetCapabilities(DWORD index, DWORD flags, XINPUT_CAPABILITIES *capabilities) {
-    vulcan_gamepad_state_t raw;
-
     (void)flags;
     if (index != 0 || capabilities == NULL) {
-        return ERROR_DEVICE_NOT_CONNECTED;
-    }
-    if (!read_state(&raw)) {
         return ERROR_DEVICE_NOT_CONNECTED;
     }
 
@@ -258,14 +252,9 @@ DWORD WINAPI XInputGetCapabilitiesEx(
     DWORD flags,
     XINPUT_CAPABILITIES_EX *capabilities
 ) {
-    vulcan_gamepad_state_t raw;
-
     (void)reserved;
     (void)flags;
     if (index != 0 || capabilities == NULL) {
-        return ERROR_DEVICE_NOT_CONNECTED;
-    }
-    if (!read_state(&raw)) {
         return ERROR_DEVICE_NOT_CONNECTED;
     }
 
@@ -286,13 +275,8 @@ DWORD WINAPI XInputGetBatteryInformation(
     BYTE device_type,
     XINPUT_BATTERY_INFORMATION *battery
 ) {
-    vulcan_gamepad_state_t raw;
-
     (void)device_type;
     if (index != 0 || battery == NULL) {
-        return ERROR_DEVICE_NOT_CONNECTED;
-    }
-    if (!read_state(&raw)) {
         return ERROR_DEVICE_NOT_CONNECTED;
     }
 
@@ -303,13 +287,8 @@ DWORD WINAPI XInputGetBatteryInformation(
 }
 
 DWORD WINAPI XInputGetKeystroke(DWORD index, DWORD flags, XINPUT_KEYSTROKE *keystroke) {
-    vulcan_gamepad_state_t raw;
-
     (void)flags;
     if (index != 0) {
-        return ERROR_DEVICE_NOT_CONNECTED;
-    }
-    if (!read_state(&raw)) {
         return ERROR_DEVICE_NOT_CONNECTED;
     }
     if (keystroke != NULL) {

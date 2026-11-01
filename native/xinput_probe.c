@@ -72,14 +72,14 @@ static void check(const char *name, int ok) {
     failures++;
 }
 
-static void write_state(uint8_t connected) {
+static void write_state(uint8_t connected, uint32_t sequence) {
     vulcan_gamepad_state_t state;
     HANDLE file;
     DWORD written = 0;
 
     memset(&state, 0, sizeof(state));
     state.magic = VULCAN_GAMEPAD_MAGIC;
-    state.sequence = 7;
+    state.sequence = sequence;
     state.buttons = 0x1401; /* A, guide, dpad up */
     state.left_trigger = 25;
     state.right_trigger = 200;
@@ -161,6 +161,7 @@ int main(void) {
     XINPUT_BATTERY_INFORMATION battery;
     XINPUT_KEYSTROKE keystroke;
     XINPUT_VIBRATION vibration;
+    XINPUT_GAMEPAD neutral;
     vulcan_rumble_t rumble;
     DWORD result;
     int loaded;
@@ -190,21 +191,26 @@ int main(void) {
 
     DeleteFileA(STATE_PATH);
     memset(&state, 0, sizeof(state));
-    check("absent state is not connected",
-          p_get_state(0, &state) == ERROR_DEVICE_NOT_CONNECTED);
-    check("absent capabilities are not connected",
-          p_get_capabilities(0, 0, &capabilities) == ERROR_DEVICE_NOT_CONNECTED);
-    check("absent extended capabilities are not connected",
+    result = p_get_state(0, &state);
+    check("absent state reports the virtual pad", result == ERROR_SUCCESS);
+    memset(&neutral, 0, sizeof(neutral));
+    check("absent state is neutral",
+          memcmp(&state.Gamepad, &neutral, sizeof(neutral)) == 0);
+    memset(&capabilities, 0, sizeof(capabilities));
+    check("absent capabilities succeed",
+          p_get_capabilities(0, 0, &capabilities) == ERROR_SUCCESS);
+    check("absent extended capabilities succeed",
           p_get_capabilities_ex != NULL
               && p_get_capabilities_ex(1, 0, 0, &capabilities_ex)
-                  == ERROR_DEVICE_NOT_CONNECTED);
-    check("absent battery is not connected",
-          p_get_battery(0, BATTERY_DEVTYPE_GAMEPAD, &battery)
-              == ERROR_DEVICE_NOT_CONNECTED);
-    check("absent keystroke is not connected",
-          p_get_keystroke(0, 0, &keystroke) == ERROR_DEVICE_NOT_CONNECTED);
+                  == ERROR_SUCCESS);
+    memset(&battery, 0, sizeof(battery));
+    check("absent battery succeeds",
+          p_get_battery(0, BATTERY_DEVTYPE_GAMEPAD, &battery) == ERROR_SUCCESS
+              && battery.BatteryType == BATTERY_TYPE_WIRED);
+    check("absent keystroke is empty",
+          p_get_keystroke(0, 0, &keystroke) == ERROR_EMPTY);
 
-    write_state(1);
+    write_state(1, 7);
     memset(&state, 0, sizeof(state));
     result = p_get_state(0, &state);
     check("connected state is reported", result == ERROR_SUCCESS);
@@ -301,18 +307,25 @@ int main(void) {
     check("re-enabled state restores input",
           result == ERROR_SUCCESS && state.Gamepad.wButtons == 0x1001);
 
-    write_state(0);
-    check("disconnected flag is not connected",
-          p_get_state(0, &state) == ERROR_DEVICE_NOT_CONNECTED);
-    check("disconnected capabilities are not connected",
-          p_get_capabilities(0, 0, &capabilities) == ERROR_DEVICE_NOT_CONNECTED);
+    write_state(0, 9);
+    memset(&state, 0, sizeof(state));
+    result = p_get_state(0, &state);
+    check("disconnected state stays attached", result == ERROR_SUCCESS);
+    check("disconnected state reads the new packet number",
+          state.dwPacketNumber == 9);
+    memset(&neutral, 0, sizeof(neutral));
+    check("disconnected state is neutral",
+          memcmp(&state.Gamepad, &neutral, sizeof(neutral)) == 0);
+    check("disconnected capabilities succeed",
+          p_get_capabilities(0, 0, &capabilities) == ERROR_SUCCESS);
     vibration.wLeftMotorSpeed = 65535;
     vibration.wRightMotorSpeed = 65535;
-    check("disconnected rumble is rejected",
-          p_set_state(0, &vibration) == ERROR_DEVICE_NOT_CONNECTED);
+    check("disconnected rumble succeeds",
+          p_set_state(0, &vibration) == ERROR_SUCCESS);
     memset(&rumble, 0, sizeof(rumble));
-    check("disconnected rumble is not recorded",
-          read_rumble(&rumble) && rumble.sequence == 4);
+    check("disconnected rumble is recorded",
+          read_rumble(&rumble) && rumble.sequence == 5
+              && rumble.left == 65535 && rumble.right == 65535);
 
     DeleteFileA(STATE_PATH);
     DeleteFileA(RUMBLE_PATH);
