@@ -18,7 +18,8 @@ check() {
 }
 
 fake_root="$workdir/wine"
-mkdir -p "$fake_root/bin" "$workdir/bin" "$workdir/games/test" "$workdir/games/other" "$workdir/home" "$workdir/wine-mount/other/bin"
+mkdir -p "$fake_root/bin" "$workdir/bin" "$workdir/games/test" "$workdir/games/other" "$workdir/home" "$workdir/wine-mount/other/bin" \
+    "$workdir/rumble" "$workdir/rumble-custom"
 capture_log="$workdir/capture.log"
 : >"$capture_log"
 
@@ -34,7 +35,21 @@ while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do
     shift
 done
 [ "$#" -gt 0 ] && shift
-exec "$@"
+if [ "${FAKE_GAMESCOPE_HOLD:-0}" = "1" ]; then
+    if [ -n "${GAMESCOPE_PID_LOG:-}" ]; then
+        printf '%s\n' "$$" >"$GAMESCOPE_PID_LOG"
+    fi
+    ( exec -a winedevice.exe sleep 30 ) &
+    "$@" &
+    child=$!
+    wait "$child" || true
+    trap 'exit 0' TERM
+    for _ in $(seq 1 30); do
+        sleep 1
+    done
+else
+    exec "$@"
+fi
 EOF
 chmod 0755 "$workdir/bin/obs-gamecapture" "$workdir/bin/gamescope"
 game_exe="$workdir/games/test/Game.exe"
@@ -56,10 +71,32 @@ if [ "$1" = "wineboot" ]; then
     fi
     mkdir -p "$WINEPREFIX/drive_c/windows/system32" "$WINEPREFIX/drive_c/windows/syswow64"
 fi
+if [ "$1" != "wineboot" ] && [ "${FAKE_WINE_EXEC:-0}" = "1" ]; then
+    printf 'pid:%s\n' "$$" >>"$WINE_LOG"
+    exec -a "$1" sleep 30
+fi
+if [ "$1" != "wineboot" ] && [ "${FAKE_WINE_SLEEP:-0}" = "1" ]; then
+    trap 'printf "term\n" >>"$WINE_LOG"; exit 143' TERM
+    printf 'pid:%s\n' "$$" >>"$WINE_LOG"
+    for _ in $(seq 1 30); do
+        sleep 1
+    done
+fi
 exit 0
 EOF
 chmod 0755 "$fake_root/bin/wine64"
 cp "$fake_root/bin/wine64" "$workdir/wine-mount/other/bin/wine64"
+
+cat >"$fake_root/bin/wineserver" <<'EOF'
+#!/bin/sh
+printf 'wineserver:%s\n' "$*" >>"${WINE_LOG:?}"
+if [ -n "${GAMESCOPE_PID_LOG:-}" ] && [ -f "$GAMESCOPE_PID_LOG" ]; then
+    kill -TERM "$(cat "$GAMESCOPE_PID_LOG")" 2>/dev/null || true
+fi
+exit 0
+EOF
+chmod 0755 "$fake_root/bin/wineserver"
+cp "$fake_root/bin/wineserver" "$workdir/wine-mount/other/bin/wineserver"
 
 catalog="$workdir/games.json"
 cat >"$catalog" <<'EOF'
@@ -95,6 +132,7 @@ run_launch() {
         WINE_MOUNT="$workdir/wine-mount" \
         PREFIX_ROOT="$workdir/prefix" \
         VULCAN_RUN_DIR="$workdir/run" \
+        VULCAN_RUMBLE_DIR="$workdir/rumble" \
         WINE_ROOT="$fake_root" \
         GAMESCOPE_ENABLED=0 \
         D3D_BACKEND=wined3d \
@@ -228,6 +266,8 @@ check 'xinput proxy installed' 'yes' \
     "$([ -f "$workdir/prefix/test/drive_c/windows/system32/xinput1_4.dll" ] && printf yes || printf no)"
 check 'gamepad state symlink installed' '/data/vulcan-gamepad.bin' \
     "$(readlink "$workdir/prefix/test/drive_c/vulcan-gamepad.bin" 2>/dev/null || true)"
+check 'rumble directory symlink installed' "$workdir/rumble" \
+    "$(readlink "$workdir/prefix/test/drive_c/vulcan-data" 2>/dev/null || true)"
 check 'xinput override enabled' 'yes' \
     "$(grep -q 'xinput1_4' "$wine_log" && printf yes || printf no)"
 
@@ -236,8 +276,88 @@ rm -rf "$workdir/prefix/test"
 run_launch test INPUT_GAMEPAD=0 XINPUT_DLL="$xinput_dll" 2>"$workdir/gamepad-off.log"
 check 'xinput proxy skipped when disabled' 'no' \
     "$([ -f "$workdir/prefix/test/drive_c/windows/system32/xinput1_4.dll" ] && printf yes || printf no)"
+check 'rumble symlink skipped when disabled' 'no' \
+    "$([ -L "$workdir/prefix/test/drive_c/vulcan-data" ] && printf yes || printf no)"
 check 'xinput override skipped when disabled' 'no' \
     "$(grep -q 'xinput1_4' "$wine_log" && printf yes || printf no)"
+
+# A custom rumble directory is linked for the session.
+rm -rf "$workdir/prefix/test"
+run_launch test XINPUT_DLL="$xinput_dll" VULCAN_RUMBLE_DIR="$workdir/rumble-custom" 2>"$workdir/gamepad-rumble.log"
+check 'custom rumble directory is linked' "$workdir/rumble-custom" \
+    "$(readlink "$workdir/prefix/test/drive_c/vulcan-data" 2>/dev/null || true)"
+
+# A missing rumble directory is reported and leaves no dangling link.
+rm -rf "$workdir/prefix/test"
+run_launch test XINPUT_DLL="$xinput_dll" VULCAN_RUMBLE_DIR="$workdir/missing-rumble" \
+    2>"$workdir/gamepad-rumble-missing.log"
+check 'missing rumble directory is reported' '1' \
+    "$(grep -c 'rumble directory not found' "$workdir/gamepad-rumble-missing.log")"
+check 'missing rumble directory is not linked' 'no' \
+    "$([ -L "$workdir/prefix/test/drive_c/vulcan-data" ] && printf yes || printf no)"
+
+# The wrapper clears stale rumble state and forwards termination.
+rm -rf "$workdir/prefix/test"
+: >"$workdir/rumble/vulcan-rumble.bin"
+: >"$workdir/rumble/vulcan-rumble.lock"
+: >"$wine_log"
+run_launch test XINPUT_DLL="$xinput_dll" FAKE_WINE_SLEEP=1 2>"$workdir/signal.log" &
+wrapper_host=$!
+for _ in $(seq 1 100); do
+    grep -q '^pid:' "$wine_log" && break
+    sleep 0.05
+done
+check 'wrapper starts the game' '1' "$(grep -c '^pid:' "$wine_log")"
+check 'wrapper clears stale rumble state at start' 'no' \
+    "$([ -e "$workdir/rumble/vulcan-rumble.bin" ] || [ -e "$workdir/rumble/vulcan-rumble.lock" ] && printf yes || printf no)"
+
+game_wrapper="$(pgrep -f "$repo_root/scripts/launch-game.sh test" | head -n 1 || true)"
+: >"$workdir/rumble/vulcan-rumble.bin"
+: >"$workdir/rumble/vulcan-rumble.lock"
+if [ -n "$game_wrapper" ]; then
+    kill -TERM "$game_wrapper"
+else
+    pkill -TERM -P "$wrapper_host" 2>/dev/null || true
+fi
+set +e
+wait "$wrapper_host" 2>/dev/null
+status=$?
+set -e
+check 'wrapper receives a launch process' 'yes' "$([ -n "$game_wrapper" ] && printf yes || printf no)"
+check 'wrapper forwards termination' '1' "$(grep -c '^term$' "$wine_log")"
+check 'wrapper clears rumble state at exit' 'no' \
+    "$([ -e "$workdir/rumble/vulcan-rumble.bin" ] || [ -e "$workdir/rumble/vulcan-rumble.lock" ] && printf yes || printf no)"
+check 'wrapper exits after termination' 'yes' "$([ "$status" -ne 0 ] && printf yes || printf no)"
+
+# Wine services can keep gamescope alive after the game exits. The wrapper
+# watches the game process and kills the prefix's wineserver.
+rm -rf "$workdir/prefix/test"
+: >"$wine_log"
+: >"$workdir/gamescope.pid"
+run_launch test XINPUT_DLL="$xinput_dll" GAMESCOPE_ENABLED=1 \
+    FAKE_GAMESCOPE_HOLD=1 FAKE_WINE_EXEC=1 \
+    GAMESCOPE_PID_LOG="$workdir/gamescope.pid" \
+    2>"$workdir/watcher.log" &
+watcher_host=$!
+for _ in $(seq 1 100); do
+    grep -q '^pid:' "$wine_log" && break
+    sleep 0.05
+done
+sleep 0.8
+wine_pid="$(sed -n 's/^pid://p' "$wine_log" | tail -n 1)"
+check 'watcher sees the game process' '1' "$([ -n "$wine_pid" ] && printf 1 || printf 0)"
+if [ -n "$wine_pid" ]; then
+    kill -TERM "$wine_pid"
+fi
+set +e
+wait "$watcher_host" 2>/dev/null
+set -e
+check 'watcher runs wineserver -k' '1' "$(grep -c '^wineserver:-k$' "$wine_log")"
+check 'watcher kills winedevice' 'no' \
+    "$(pgrep -f 'winedevice\.exe' >/dev/null 2>&1 && printf yes || printf no)"
+check 'watcher clears rumble state' 'no' \
+    "$([ -e "$workdir/rumble/vulcan-rumble.bin" ] || [ -e "$workdir/rumble/vulcan-rumble.lock" ] && printf yes || printf no)"
+check 'watcher exits the wrapper' 'yes' "$([ -n "$wine_pid" ] && printf yes || printf no)"
 
 # A 32-bit process resolves system32 to syswow64 and needs its own copy.
 rm -rf "$workdir/prefix/test"
@@ -269,6 +389,8 @@ rm -rf "$workdir/prefix/test"
 run_launch test WINEARCH=win32 XINPUT_DLL="$xinput_dll" XINPUT_DLL_32="$xinput_dll_32" 2>"$workdir/gamepad-win32.log"
 check 'win32 prefix receives the 32-bit proxy' 'xinput32' \
     "$(cat "$workdir/prefix/test/drive_c/windows/system32/xinput1_4.dll" 2>/dev/null || true)"
+check 'win32 prefix receives the rumble directory' "$workdir/rumble" \
+    "$(readlink "$workdir/prefix/test/drive_c/vulcan-data" 2>/dev/null || true)"
 check 'win32 prefix logs no missing proxy' '0' \
     "$(grep -c 'XInput proxy not found' "$workdir/gamepad-win32.log" || true)"
 

@@ -59,6 +59,16 @@ if [ "$INPUT_TRANSPORT" = "socket" ]; then
     export VULCAN_INPUT_SOCKET="${VULCAN_INPUT_SOCKET:-${XDG_RUNTIME_DIR}/vulcan-input.sock}"
     if [ "${INPUT_GAMEPAD:-1}" = "1" ]; then
         export VULCAN_GAMEPAD_STATE="${VULCAN_GAMEPAD_STATE:-/data/vulcan-gamepad.bin}"
+        rumble_dir="${VULCAN_RUMBLE_DIR:-$(dirname "$VULCAN_GAMEPAD_STATE")}"
+        case "$rumble_dir" in
+            /*) ;;
+            *) rumble_dir="$(cd "$rumble_dir" 2>/dev/null && pwd)" || rumble_dir="" ;;
+        esac
+        if [ -z "$rumble_dir" ] || [ ! -d "$rumble_dir" ]; then
+            printf '[vulcan] rumble directory not found; using /data\n' >&2
+            rumble_dir=/data
+        fi
+        export VULCAN_RUMBLE_DIR="$rumble_dir"
     fi
     unset LD_PRELOAD
     /usr/local/bin/vulcan-inputd >>/data/log/vulcan-inputd.log 2>&1 &

@@ -37,7 +37,7 @@ if [ -n "$(game_field "$GAMES_CATALOG_PATH" "$GAME_ID" wine_source)" ]; then
 fi
 
 # One container owns one display, audio sink, and input socket. Keep one game
-# process at a time; the lock survives the exec into Wine.
+# process at a time; the descriptor is inherited by the game wrapper.
 install -d -m 0755 "$VULCAN_RUN_DIR"
 exec 9>"$VULCAN_RUN_DIR/game.lock"
 if ! flock -n 9; then
@@ -210,6 +210,72 @@ if [ "$INPUT_GAMEPAD" = "1" ]; then
     fi
     ln -sfn "${VULCAN_GAMEPAD_STATE:-/data/vulcan-gamepad.bin}" \
         "$WINEPREFIX/drive_c/vulcan-gamepad.bin"
+    rumble_dir="${VULCAN_RUMBLE_DIR:-/data}"
+    case "$rumble_dir" in
+        /*) ;;
+        *) rumble_dir="$(cd "$rumble_dir" 2>/dev/null && pwd)" || rumble_dir="" ;;
+    esac
+    if [ -n "$rumble_dir" ] && [ -d "$rumble_dir" ]; then
+        ln -sfnT "$rumble_dir" "$WINEPREFIX/drive_c/vulcan-data" 2>/dev/null \
+            || printf '[vulcan] cannot link the rumble directory: %s\n' "$rumble_dir" >&2
+    else
+        printf '[vulcan] rumble directory not found: %s\n' "${VULCAN_RUMBLE_DIR:-/data}" >&2
+    fi
+fi
+
+rumble_state_dir="${rumble_dir:-${VULCAN_RUMBLE_DIR:-/data}}"
+
+cleanup_rumble() {
+    rm -f -- "$rumble_state_dir/vulcan-rumble.bin" \
+        "$rumble_state_dir/vulcan-rumble.lock" 2>/dev/null || true
+}
+
+wineserver_bin="${WINE_ROOT}/bin/wineserver"
+if [ ! -x "$wineserver_bin" ]; then
+    wineserver_bin="$(command -v wineserver 2>/dev/null || true)"
+fi
+kill_wine() {
+    if [ -n "${WINEPREFIX:-}" ] && [ -n "${wineserver_bin:-}" ]; then
+        WINEPREFIX="$WINEPREFIX" "$wineserver_bin" -k >/dev/null 2>&1 || true
+    fi
+    # wineserver -k can leave an orphaned Wine service holding gamescope open;
+    # the service ignores TERM.
+    pkill -KILL -f 'winedevice\.exe' >/dev/null 2>&1 || true
+}
+
+game_basename="${GAME_EXE##*/}"
+game_running() {
+    local proc argv0 name
+    for proc in /proc/[0-9]*; do
+        [ -r "$proc/cmdline" ] || continue
+        IFS= read -r -d '' argv0 <"$proc/cmdline" 2>/dev/null || true
+        [ -n "$argv0" ] || continue
+        name="${argv0##*/}"
+        name="${name##*\\}"
+        case "$name" in
+            "$game_basename"|steam.exe) return 0 ;;
+        esac
+    done
+    return 1
+}
+
+game_pid=""
+forward_term() {
+    kill_wine
+    if [ -n "$game_pid" ]; then
+        kill -TERM "$game_pid" 2>/dev/null || true
+        wait "$game_pid" 2>/dev/null || true
+    fi
+    exit 143
+}
+
+trap cleanup_rumble EXIT
+trap forward_term TERM INT
+
+# A previous game can leave a stale record or lock after a crash.
+if [ "$INPUT_GAMEPAD" = "1" ]; then
+    rm -f -- "$rumble_state_dir/vulcan-rumble.bin" \
+        "$rumble_state_dir/vulcan-rumble.lock" 2>/dev/null || true
 fi
 
 if [ "$GAMESCOPE_ENABLED" = "1" ]; then
@@ -233,7 +299,41 @@ if [ "$GAMESCOPE_ENABLED" = "1" ]; then
         args+=(--force-windows-fullscreen)
     fi
 
-    exec gamescope "${args[@]}" -- "${runner[@]}"
+    gamescope "${args[@]}" -- "${runner[@]}" &
+    game_pid=$!
+else
+    "${runner[@]}" &
+    game_pid=$!
 fi
 
-exec "${runner[@]}"
+# Wine services keep gamescope and the wrapper alive after the game exits.
+# Probe the game process itself and kill the prefix's Wine server once it is gone.
+game_seen=0
+while kill -0 "$game_pid" 2>/dev/null; do
+    if game_running; then
+        game_seen=1
+    elif [ "$game_seen" = 1 ]; then
+        printf '[vulcan] game exited; stopping Wine\n' >&2
+        kill_wine
+        for _ in $(seq 1 25); do
+            kill -0 "$game_pid" 2>/dev/null || break
+            sleep 0.2
+        done
+        if kill -0 "$game_pid" 2>/dev/null; then
+            kill -TERM "$game_pid" 2>/dev/null || true
+            for _ in $(seq 1 25); do
+                kill -0 "$game_pid" 2>/dev/null || break
+                sleep 0.2
+            done
+        fi
+        if kill -0 "$game_pid" 2>/dev/null; then
+            kill -KILL "$game_pid" 2>/dev/null || true
+        fi
+        break
+    fi
+    sleep 0.5
+done
+
+status=0
+wait "$game_pid" || status=$?
+exit "$status"
