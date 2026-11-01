@@ -46,9 +46,11 @@ export WAYLAND_DISPLAY="$(basename "$wayland_socket")"
 unset DISPLAY
 
 # wbg decodes the PNG itself; gdk-pixbuf and glycin stay off the wallpaper path.
-# Stretch keeps the frame filled for any GAME_MODE aspect ratio.
+# Stretch keeps the frame filled for any GAME_MODE aspect ratio. The session
+# log is opened by the entrypoint as root, so the daemon inherits it instead of
+# reopening a file the game user cannot append to.
 if [ -x /usr/local/bin/wbg ]; then
-    /usr/local/bin/wbg -s /usr/share/vulcan/wallpaper.png >>/data/log/sway.log 2>&1 &
+    /usr/local/bin/wbg -s /usr/share/vulcan/wallpaper.png &
 else
     printf '[vulcan] wbg not found; no wallpaper\n' >&2
 fi
