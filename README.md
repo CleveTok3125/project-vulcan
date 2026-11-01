@@ -731,9 +731,22 @@ only one game runs at a time.
 The input socket is `/run/user/1000/vulcan-input.sock`; `/run` is a tmpfs, so
 the socket exists only while the container runs.
 
-`launch-game.sh` installs the native XInput DLL and sets `WINEDLLOVERRIDES`.
-Set `INPUT_GAMEPAD=0` to skip both the pad state file and the DLL. Games that
-use DirectInput or raw HID instead of XInput do not see a controller.
+`launch-game.sh` installs the native XInput DLL for both architectures and
+sets `WINEDLLOVERRIDES`. The 64-bit DLL goes to
+`drive_c/windows/system32`, the 32-bit DLL to `drive_c/windows/syswow64`,
+because a 32-bit process resolves `system32` to `syswow64`. Set
+`INPUT_GAMEPAD=0` to skip both the pad state file and the DLLs. Games that use
+DirectInput or raw HID instead of XInput do not see a controller.
+
+The proxy reports the pad only after Apollo creates the virtual gamepad for
+the streaming client, so a client without a controller sees no XInput
+device. The guide button is reported only through the undocumented ordinal
+100, which SDL and most overlays use; the documented `XInputGetState` masks
+it out and `XInputGetCapabilities` keeps the real-hardware mask `0xF3FF`.
+Vibration requests are accepted and dropped: Apollo supports rumble, but the
+Vulcan shim replaces the virtual uinput device, so its force-feedback
+listener is disabled. Gyroscope, adaptive triggers, and the RGB LED are not
+part of XInput and stay unavailable.
 
 Sway runs with `WLR_BACKENDS=headless`. `GAMESCOPE_TOUCH_MODE` controls
 gamescope's touch handling. Pointer and keyboard input reaches the game
