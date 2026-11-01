@@ -29,10 +29,16 @@ RUN useradd -m -u 1001 builder \
 USER builder
 WORKDIR /home/builder
 
+COPY docker/apollo-rumble.patch /home/builder/apollo-rumble.patch
+
 # apollo-git builds its CUDA frame conversion path only when the cuda package
 # is installed. Without it nvenc initializes but the encoder test fails with
 # "Couldn't scale frame: Invalid argument" and Apollo falls back to libx264.
 # The toolkit stays in this stage; the game image only receives the package.
+#
+# The rumble patch adds a reader for the file the XInput proxy writes. It is
+# applied inside the AUR prepare() after the submodule checkout; the anchor
+# check fails the build if the package recipe changes shape.
 RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
     sudo pacman -Sy --noconfirm --needed \
     && sudo /usr/local/bin/fetch-heavy cuda \
@@ -41,6 +47,11 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
     && cd "/home/builder/${APOLLO_PKG}" \
     && if [ "$APOLLO_PKG" = "apollo-git" ]; then \
          sed -i "s|^: \${_commit=}|: \${_commit=${APOLLO_COMMIT}}|" PKGBUILD; \
+         sed -i '/git -C third-party\/moonlight-common-c submodule update --init --depth 1/a\  patch -Np1 -i /home/builder/apollo-rumble.patch' PKGBUILD; \
+         grep -q 'apollo-rumble.patch' PKGBUILD \
+           || { printf 'apollo-git PKGBUILD changed; rumble patch not applied\n' >&2; exit 1; }; \
+       else \
+         printf '[vulcan] APOLLO_PKG=%s: rumble patch not applied\n' "$APOLLO_PKG" >&2; \
        fi \
     && makepkg -s --noconfirm
 
