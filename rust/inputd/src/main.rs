@@ -1,9 +1,12 @@
+#![deny(unsafe_op_in_unsafe_fn)]
+#![deny(clippy::undocumented_unsafe_blocks)]
+
 mod touch;
 
 use std::ffi::{c_char, c_int, c_void, CString};
 use std::io::{self, Read};
 use std::os::raw::c_uint;
-use std::os::unix::fs::FileTypeExt;
+use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -34,7 +37,10 @@ const EI_DEVICE_CAP_BUTTON: c_uint = 1 << 5;
 
 const GAMEPAD_MAGIC: u32 = 0x5647_5031;
 
-#[repr(C)]
+/// Byte length of the gamepad record read by the XInput DLL.
+const GAMEPAD_STATE_LEN: usize = 28;
+
+#[derive(Debug, Eq, PartialEq)]
 struct GamepadState {
     magic: u32,
     sequence: u32,
@@ -46,7 +52,28 @@ struct GamepadState {
     thumb_rx: i16,
     thumb_ry: i16,
     connected: u8,
-    padding: [u8; 7],
+}
+
+impl GamepadState {
+    /// Serializes the record consumed by `native/xinput1_4.c`.
+    ///
+    /// The field order and the seven trailing zero bytes mirror
+    /// `vulcan_gamepad_state_t`; the format is little-endian so it does not
+    /// depend on the layout the compiler picks for this struct.
+    fn to_bytes(&self) -> [u8; GAMEPAD_STATE_LEN] {
+        let mut out = [0u8; GAMEPAD_STATE_LEN];
+        out[0..4].copy_from_slice(&self.magic.to_le_bytes());
+        out[4..8].copy_from_slice(&self.sequence.to_le_bytes());
+        out[8..10].copy_from_slice(&self.buttons.to_le_bytes());
+        out[10] = self.left_trigger;
+        out[11] = self.right_trigger;
+        out[12..14].copy_from_slice(&self.thumb_lx.to_le_bytes());
+        out[14..16].copy_from_slice(&self.thumb_ly.to_le_bytes());
+        out[16..18].copy_from_slice(&self.thumb_rx.to_le_bytes());
+        out[18..20].copy_from_slice(&self.thumb_ry.to_le_bytes());
+        out[20] = self.connected;
+        out
+    }
 }
 
 #[repr(C)]
@@ -176,6 +203,12 @@ impl Emulation {
     }
 }
 
+/// libei sender and its state.
+///
+/// `context`, `device` and `touches` are libei-owned references kept by this
+/// struct alone. Every `unsafe` block that touches them relies on the same
+/// invariant: a non-null pointer was handed out by libei and is released
+/// exactly once through `reset` or `release_touches`.
 struct Backend {
     context: *mut ei,
     device: *mut ei_device,
@@ -230,7 +263,6 @@ impl Backend {
                 thumb_ry: 0,
                 // The proxy stays attached; connected marks client pad data.
                 connected: 0,
-                padding: [0; 7],
             },
             gamepad_dirty: false,
             gamepad_path,
@@ -247,13 +279,7 @@ impl Backend {
             let _ = std::fs::create_dir_all(parent);
         }
         let tmp = self.gamepad_path.with_extension("tmp");
-        let bytes = unsafe {
-            std::slice::from_raw_parts(
-                (&self.gamepad as *const GamepadState).cast::<u8>(),
-                std::mem::size_of::<GamepadState>(),
-            )
-        };
-        if std::fs::write(&tmp, bytes).is_ok() {
+        if std::fs::write(&tmp, self.gamepad.to_bytes()).is_ok() {
             let _ = std::fs::rename(&tmp, &self.gamepad_path);
         }
     }
@@ -306,10 +332,14 @@ impl Backend {
     fn reset(&mut self) {
         self.release_touches();
         if !self.device.is_null() {
+            // SAFETY: `device` holds a reference obtained from
+            // `ei_device_ref`, released here exactly once.
             unsafe { ei_device_unref(self.device) };
             self.device = std::ptr::null_mut();
         }
         if !self.context.is_null() {
+            // SAFETY: `context` was returned by `ei_new_sender` and is
+            // released here exactly once.
             unsafe { ei_unref(self.context) };
             self.context = std::ptr::null_mut();
         }
@@ -321,6 +351,8 @@ impl Backend {
     fn release_touches(&mut self) {
         for touch in &mut self.touches {
             if !touch.is_null() {
+                // SAFETY: every slot holds a reference from
+                // `ei_device_touch_new`, released here exactly once.
                 unsafe { ei_touch_unref(*touch) };
                 *touch = std::ptr::null_mut();
             }
@@ -328,8 +360,12 @@ impl Backend {
         self.touch_capable = false;
     }
 
+    /// Reports whether libei is usable for emulation.
+    ///
+    /// `ei_device_frame` and `ei_now` also need the context, so both pointers
+    /// are part of the condition.
     fn ready(&self) -> bool {
-        !self.device.is_null()
+        !self.context.is_null() && !self.device.is_null()
     }
 
     fn log_wait(&mut self, message: &str) {
@@ -366,10 +402,14 @@ impl Backend {
         };
 
         if self.context.is_null() {
+            // SAFETY: `ei_new_sender` returns a new sender with no input
+            // requirements; a null result is handled below.
             self.context = unsafe { ei_new_sender(std::ptr::null_mut()) };
             if self.context.is_null() {
                 return false;
             }
+            // SAFETY: `context` is non-null and `socket` is a live CString for
+            // the duration of the call.
             if unsafe { ei_setup_backend_socket(self.context, socket.as_ptr()) } != 0 {
                 self.log_wait("cannot open gamescope EIS socket");
                 self.reset();
@@ -397,6 +437,11 @@ impl Backend {
 
     /// Read and dispatch whatever libei has queued.
     fn poll_eis(&mut self, timeout: Duration) -> bool {
+        if self.context.is_null() {
+            return false;
+        }
+        let timeout_ms = c_int::try_from(timeout.as_millis()).unwrap_or(c_int::MAX);
+        // SAFETY: `context` is a live sender checked above.
         let fd = unsafe { ei_get_fd(self.context) };
         if fd < 0 {
             return false;
@@ -407,7 +452,9 @@ impl Backend {
             events: libc::POLLIN,
             revents: 0,
         };
-        let result = unsafe { libc::poll(&mut poll_fd, 1, timeout.as_millis() as c_int) };
+        // SAFETY: `poll_fd` points to one initialized entry and the count
+        // matches, so poll only writes into that entry.
+        let result = unsafe { libc::poll(&mut poll_fd, 1, timeout_ms) };
         if result < 0 {
             return io::Error::last_os_error().kind() == io::ErrorKind::Interrupted;
         }
@@ -415,6 +462,8 @@ impl Backend {
             return true;
         }
 
+        // SAFETY: `context` is still non-null and owned here; `dispatch_events`
+        // releases it before returning on disconnect.
         unsafe { ei_dispatch(self.context) };
         self.dispatch_events();
         true
@@ -434,16 +483,23 @@ impl Backend {
         // A disconnect or device removal resets the context mid-loop; reading
         // further events then would pass a null pointer to libei.
         while !self.context.is_null() {
+            // SAFETY: the loop condition guarantees a live sender context.
             let event = unsafe { ei_get_event(self.context) };
             if event.is_null() {
                 break;
             }
+            // SAFETY: `event` was returned by `ei_get_event` and is still
+            // referenced below, so it is valid.
             let event_type = unsafe { ei_event_get_type(event) };
             match event_type {
                 EI_EVENT_CONNECT => {}
                 EI_EVENT_SEAT_ADDED => {
+                    // SAFETY: `event` is valid, so the seat accessor is too.
                     let seat = unsafe { ei_event_get_seat(event) };
                     if !seat.is_null() {
+                        // SAFETY: varargs are read until the null sentinel; the
+                        // capability values are plain `c_uint` and the sentinel
+                        // is a null pointer constant.
                         unsafe {
                             ei_seat_bind_capabilities(
                                 seat,
@@ -460,19 +516,26 @@ impl Backend {
                 }
                 EI_EVENT_DEVICE_ADDED => {
                     if self.device.is_null() {
+                        // SAFETY: `event` is valid and belongs to this dispatch.
                         let device = unsafe { ei_event_get_device(event) };
                         if !device.is_null() {
+                            // SAFETY: `device` is non-null; the reference keeps
+                            // it alive after the event is released.
                             self.device = unsafe { ei_device_ref(device) };
+                            // SAFETY: same live device as above.
                             self.touch_capable =
                                 unsafe { ei_device_has_capability(device, EI_DEVICE_CAP_TOUCH) };
                             eprintln!("[vulcan-inputd] EIS device added {device:p}");
                         }
                     } else {
+                        // SAFETY: `event` is valid; the device is only logged.
                         let device = unsafe { ei_event_get_device(event) };
                         eprintln!("[vulcan-inputd] EIS extra device ignored {device:p}");
                     }
                 }
                 EI_EVENT_DEVICE_RESUMED => {
+                    // SAFETY: `event` is valid; the pointer is only compared and
+                    // logged, never dereferenced.
                     let device = unsafe { ei_event_get_device(event) };
                     if !device.is_null() && device != self.device {
                         eprintln!("[vulcan-inputd] EIS resume for untracked device {device:p}");
@@ -486,6 +549,7 @@ impl Backend {
                     }
                 }
                 EI_EVENT_DEVICE_PAUSED => {
+                    // SAFETY: `event` is valid; the pointer is only logged.
                     let device = unsafe { ei_event_get_device(event) };
                     let was_active = self.emulation.active();
                     self.emulation.on_event(event_type);
@@ -496,6 +560,8 @@ impl Backend {
                 EI_EVENT_DEVICE_REMOVED | EI_EVENT_DISCONNECT => self.reset(),
                 _ => {}
             }
+            // SAFETY: `event` came from `ei_get_event` and is released once
+            // here; the loop re-reads the context each iteration.
             unsafe { ei_event_unref(event) };
         }
     }
@@ -521,11 +587,14 @@ impl Backend {
             "[vulcan-inputd] EIS start emulating seq {} device {:p}",
             self.sequence, self.device
         );
+        // SAFETY: `device` was checked non-null above.
         unsafe { ei_device_start_emulating(self.device, self.sequence) };
     }
 
     fn frame(&self) {
         if self.ready() {
+            // SAFETY: `ready` guarantees both the context and the device are
+            // live, and neither is released by these calls.
             unsafe { ei_device_frame(self.device, ei_now(self.context)) };
         }
     }
@@ -566,28 +635,35 @@ impl Backend {
 
         match event.kind {
             KIND_KEYBOARD => match event.event_type {
-                EV_KEY => unsafe {
-                    ei_device_keyboard_key(device, event.code as u32, event.value != 0)
-                },
+                EV_KEY => {
+                    // SAFETY: `device` is live and owned by `self`; the call
+                    // only uses the device and scalar arguments.
+                    unsafe { ei_device_keyboard_key(device, event.code as u32, event.value != 0) }
+                }
                 EV_SYN if event.code == SYN_REPORT => self.frame(),
                 _ => {}
             },
             KIND_MOUSE => match event.event_type {
-                EV_REL if event.code == REL_X => unsafe {
-                    ei_device_pointer_motion(device, f64::from(event.value), 0.0)
-                },
-                EV_REL if event.code == REL_Y => unsafe {
-                    ei_device_pointer_motion(device, 0.0, f64::from(event.value))
-                },
-                EV_REL if event.code == REL_WHEEL => unsafe {
-                    ei_device_scroll_discrete(device, 0, event.value.saturating_mul(120))
-                },
-                EV_REL if event.code == REL_HWHEEL => unsafe {
-                    ei_device_scroll_discrete(device, event.value.saturating_mul(120), 0)
-                },
-                EV_KEY if (BTN_MISC..=BTN_TASK).contains(&event.code) => unsafe {
-                    ei_device_button_button(device, event.code as u32, event.value != 0)
-                },
+                EV_REL if event.code == REL_X => {
+                    // SAFETY: live device, scalar arguments only.
+                    unsafe { ei_device_pointer_motion(device, f64::from(event.value), 0.0) }
+                }
+                EV_REL if event.code == REL_Y => {
+                    // SAFETY: live device, scalar arguments only.
+                    unsafe { ei_device_pointer_motion(device, 0.0, f64::from(event.value)) }
+                }
+                EV_REL if event.code == REL_WHEEL => {
+                    // SAFETY: live device, scalar arguments only.
+                    unsafe { ei_device_scroll_discrete(device, 0, event.value.saturating_mul(120)) }
+                }
+                EV_REL if event.code == REL_HWHEEL => {
+                    // SAFETY: live device, scalar arguments only.
+                    unsafe { ei_device_scroll_discrete(device, event.value.saturating_mul(120), 0) }
+                }
+                EV_KEY if (BTN_MISC..=BTN_TASK).contains(&event.code) => {
+                    // SAFETY: live device, scalar arguments only.
+                    unsafe { ei_device_button_button(device, event.code as u32, event.value != 0) }
+                }
                 EV_SYN if event.code == SYN_REPORT => self.frame(),
                 _ => {}
             },
@@ -599,10 +675,14 @@ impl Backend {
                         self.absolute_y = event.value;
                     }
                 }
-                EV_KEY if (BTN_MISC..=BTN_TASK).contains(&event.code) => unsafe {
-                    ei_device_button_button(device, event.code as u32, event.value != 0)
-                },
+                EV_KEY if (BTN_MISC..=BTN_TASK).contains(&event.code) => {
+                    // SAFETY: live device, scalar arguments only.
+                    unsafe { ei_device_button_button(device, event.code as u32, event.value != 0) }
+                }
                 EV_SYN if event.code == SYN_REPORT => {
+                    // The shim sends absolute pointer axes in screen pixels;
+                    // gamescope resolves them in that space.
+                    // SAFETY: live device, scalar arguments only.
                     unsafe {
                         ei_device_pointer_motion_absolute(
                             device,
@@ -633,15 +713,24 @@ impl Backend {
         for action in actions {
             match action {
                 touch::TouchAction::Down { slot, x, y } => {
+                    // SAFETY: `device` is live and owned by `self`.
                     let new_touch = unsafe { ei_device_touch_new(device) };
                     if !new_touch.is_null() {
+                        // The tracker releases a slot before reusing it, but a
+                        // stale object here would leak, so drop it defensively.
+                        let stale = std::mem::replace(&mut self.touches[slot], new_touch);
+                        if !stale.is_null() {
+                            // SAFETY: `stale` came from `ei_device_touch_new`.
+                            unsafe { ei_touch_unref(stale) };
+                        }
+                        // SAFETY: `new_touch` is non-null and owned by the slot.
                         unsafe { ei_touch_down(new_touch, x, y) };
-                        self.touches[slot] = new_touch;
                     }
                 }
                 touch::TouchAction::Motion { slot, x, y } => {
                     let active = self.touches[slot];
                     if !active.is_null() {
+                        // SAFETY: the slot only holds live touch objects.
                         unsafe { ei_touch_motion(active, x, y) };
                     }
                 }
@@ -649,6 +738,8 @@ impl Backend {
                     let finished =
                         std::mem::replace(&mut self.touches[slot], std::ptr::null_mut());
                     if !finished.is_null() {
+                        // SAFETY: `finished` was live and is now owned here; up
+                        // is sent once before the reference is released.
                         unsafe {
                             ei_touch_up(finished);
                             ei_touch_unref(finished);
@@ -754,9 +845,19 @@ fn gamepad_button(code: u16) -> Option<u16> {
     })
 }
 
+/// Returns the effective user id of this process.
+fn current_uid() -> u32 {
+    // SAFETY: `geteuid` has no preconditions and cannot fail.
+    unsafe { libc::geteuid() }
+}
+
+/// Reports whether `path` is a socket owned by this user.
+///
+/// The owner check keeps an ambient path from another user out of the backend
+/// selection, which would otherwise let that user redirect input.
 fn socket_is_live(path: &Path) -> bool {
     path.symlink_metadata()
-        .map(|meta| meta.file_type().is_socket())
+        .map(|meta| meta.file_type().is_socket() && meta.uid() == current_uid())
         .unwrap_or(false)
 }
 
@@ -780,7 +881,8 @@ fn socket_in(directory: &Path) -> Option<PathBuf> {
 /// Only paths that belong to the container are inspected: the explicit
 /// override, the environment of the processes in this PID namespace, and the
 /// session runtime directory. Ambient directories shared with the host or with
-/// another session are not searched.
+/// another session are not searched, and every candidate must be a socket owned
+/// by the current user.
 fn find_eis_socket() -> Option<PathBuf> {
     if let Ok(path) = std::env::var("VULCAN_EIS_SOCKET") {
         let path = PathBuf::from(path);
@@ -827,6 +929,11 @@ fn find_eis_socket() -> Option<PathBuf> {
     None
 }
 
+/// Serves the single input producer of this session.
+///
+/// One shim owns the socket, so one connection is handled at a time and a
+/// second client waits in the socket backlog. The blocking read keeps the
+/// daemon simple; revisit it if multiple producers need the socket.
 fn serve(mut stream: UnixStream, backend: &mut Backend) {
     let mut bytes = [0u8; vulcan_input_proto::WIRE_LEN];
     loop {
@@ -838,14 +945,88 @@ fn serve(mut stream: UnixStream, backend: &mut Backend) {
     }
 }
 
+/// Removes the socket left by a previous run.
+///
+/// Only a socket owned by the current user is unlinked; anything else at that
+/// path is reported instead of deleted.
+fn clear_stale_socket(path: &Path) -> io::Result<()> {
+    match path.symlink_metadata() {
+        Ok(metadata) if metadata.file_type().is_socket() && metadata.uid() == current_uid() => {
+            std::fs::remove_file(path)
+        }
+        Ok(_) => Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!("{} is not a socket owned by this user", path.display()),
+        )),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+fn main() -> io::Result<()> {
+    let socket_path = std::env::var("VULCAN_INPUT_SOCKET")
+        .ok()
+        .filter(|path| !path.is_empty())
+        .or_else(|| {
+            std::env::var("XDG_RUNTIME_DIR")
+                .ok()
+                .map(|runtime| format!("{runtime}/vulcan-input.sock"))
+        })
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                "VULCAN_INPUT_SOCKET or XDG_RUNTIME_DIR is required",
+            )
+        })?;
+    clear_stale_socket(Path::new(&socket_path))?;
+    let listener = UnixListener::bind(&socket_path)?;
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600))?;
+
+    eprintln!("[vulcan-inputd] listening on {socket_path}");
+    let mut backend = Backend::new();
+    for stream in listener.incoming() {
+        match stream {
+            Ok(stream) => serve(stream, &mut backend),
+            Err(error) => eprintln!("[vulcan-inputd] accept: {error}"),
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn gamepad_state_layout_matches_proxy() {
-        assert_eq!(std::mem::size_of::<GamepadState>(), 28);
-        assert_eq!(GAMEPAD_MAGIC, 0x5647_5031);
+    fn gamepad_record_matches_the_xinput_dll() {
+        let bytes = test_state().to_bytes();
+        assert_eq!(bytes.len(), 28);
+        assert_eq!(&bytes[0..4], &GAMEPAD_MAGIC.to_le_bytes());
+        assert_eq!(&bytes[4..8], &0u32.to_le_bytes());
+        assert_eq!(&bytes[8..10], &0u16.to_le_bytes());
+        assert_eq!(bytes[10], 0);
+        assert_eq!(bytes[11], 0);
+        assert_eq!(&bytes[12..14], &0i16.to_le_bytes());
+        assert_eq!(bytes[20], 1);
+        assert_eq!(&bytes[21..28], &[0u8; 7]);
+    }
+
+    #[test]
+    fn gamepad_record_roundtrips_every_field() {
+        let state = GamepadState {
+            magic: GAMEPAD_MAGIC,
+            sequence: 0x1122_3344,
+            buttons: 0xA55A,
+            left_trigger: 17,
+            right_trigger: 231,
+            thumb_lx: -1234,
+            thumb_ly: 2345,
+            thumb_rx: -3456,
+            thumb_ry: 4567,
+            connected: 1,
+        };
+        assert_eq!(decode_gamepad(&state.to_bytes()), state);
     }
 
     fn test_state() -> GamepadState {
@@ -860,8 +1041,57 @@ mod tests {
             thumb_rx: 0,
             thumb_ry: 0,
             connected: 1,
-            padding: [0; 7],
         }
+    }
+
+    /// Decodes the record the way the XInput DLL does.
+    fn decode_gamepad(bytes: &[u8]) -> GamepadState {
+        assert_eq!(bytes.len(), GAMEPAD_STATE_LEN);
+        GamepadState {
+            magic: u32::from_le_bytes(bytes[0..4].try_into().unwrap()),
+            sequence: u32::from_le_bytes(bytes[4..8].try_into().unwrap()),
+            buttons: u16::from_le_bytes(bytes[8..10].try_into().unwrap()),
+            left_trigger: bytes[10],
+            right_trigger: bytes[11],
+            thumb_lx: i16::from_le_bytes(bytes[12..14].try_into().unwrap()),
+            thumb_ly: i16::from_le_bytes(bytes[14..16].try_into().unwrap()),
+            thumb_rx: i16::from_le_bytes(bytes[16..18].try_into().unwrap()),
+            thumb_ry: i16::from_le_bytes(bytes[18..20].try_into().unwrap()),
+            connected: bytes[20],
+        }
+    }
+
+    #[test]
+    fn stale_socket_of_this_user_is_removed() {
+        let path = temp_path("stale");
+        let listener = UnixListener::bind(&path).unwrap();
+        drop(listener);
+        clear_stale_socket(&path).unwrap();
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn stale_socket_removal_refuses_other_files() {
+        let path = temp_path("regular");
+        std::fs::write(&path, b"keep").unwrap();
+        let error = clear_stale_socket(&path).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read(&path).unwrap(), b"keep");
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn stale_socket_removal_accepts_a_missing_path() {
+        let path = temp_path("missing");
+        clear_stale_socket(&path).unwrap();
+    }
+
+    fn temp_path(name: &str) -> std::path::PathBuf {
+        let directory =
+            std::env::temp_dir().join(format!("vulcan-socket-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        directory.join("input.sock")
     }
 
     #[test]
@@ -1021,9 +1251,7 @@ mod tests {
     }
 
     fn read_gamepad(path: &std::path::Path) -> GamepadState {
-        let bytes = std::fs::read(path).unwrap();
-        assert_eq!(bytes.len(), std::mem::size_of::<GamepadState>());
-        unsafe { std::ptr::read_unaligned(bytes.as_ptr().cast::<GamepadState>()) }
+        decode_gamepad(&std::fs::read(path).unwrap())
     }
 
     fn test_backend(name: &str) -> (Backend, std::path::PathBuf) {
@@ -1128,33 +1356,3 @@ mod tests {
     }
 }
 
-fn main() -> io::Result<()> {
-    let socket_path = std::env::var("VULCAN_INPUT_SOCKET")
-        .ok()
-        .filter(|path| !path.is_empty())
-        .or_else(|| {
-            std::env::var("XDG_RUNTIME_DIR")
-                .ok()
-                .map(|runtime| format!("{runtime}/vulcan-input.sock"))
-        })
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                "VULCAN_INPUT_SOCKET or XDG_RUNTIME_DIR is required",
-            )
-        })?;
-    let _ = std::fs::remove_file(&socket_path);
-    let listener = UnixListener::bind(&socket_path)?;
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600))?;
-
-    eprintln!("[vulcan-inputd] listening on {socket_path}");
-    let mut backend = Backend::new();
-    for stream in listener.incoming() {
-        match stream {
-            Ok(stream) => serve(stream, &mut backend),
-            Err(error) => eprintln!("[vulcan-inputd] accept: {error}"),
-        }
-    }
-    Ok(())
-}

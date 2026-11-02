@@ -769,6 +769,11 @@ Apollo -> libvulcan_uinput_shim.so -> /run/user/1000/vulcan-input.sock
 and reads `device.resumed` before it sends input; libei rejects events for a
 device that is not emulating.
 
+Each session has one input producer: the shim inside Apollo. `vulcan-inputd`
+serves one connection at a time with a blocking read loop, so a second client
+waits in the socket backlog. This matches the one-shim-per-container model.
+Revisit it if multiple producers need the same socket.
+
 ### Cursor
 
 The streamed cursor is the game's own cursor image, drawn by gamescope and

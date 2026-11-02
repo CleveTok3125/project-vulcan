@@ -1,14 +1,23 @@
+#![deny(unsafe_op_in_unsafe_fn)]
+#![deny(clippy::undocumented_unsafe_blocks)]
+
+//! `LD_PRELOAD` shim that replaces the virtual input devices Apollo creates.
+//!
+//! Only the small `libevdev_uinput` surface Apollo uses is interposed: the
+//! create and destroy calls, the accessors, and the event writer. Every other
+//! symbol from libevdev is resolved from the real library at first use.
+
 use std::collections::HashSet;
 use std::ffi::{CStr, CString};
+use std::io::{self, Write};
 use std::os::raw::{c_char, c_int, c_uint, c_void};
 use std::os::unix::net::UnixStream;
 use std::sync::{Mutex, OnceLock};
 
 use vulcan_input_proto::{
-    Event, BTN_MISC, BTN_TASK, EV_ABS, EV_KEY, EV_REL, EV_SYN, KIND_GAMEPAD,
-    KIND_GAMEPAD_CONNECT, KIND_GAMEPAD_DISCONNECT, KIND_KEYBOARD,
-    KIND_MOUSE, KIND_MOUSE_ABSOLUTE, KIND_PASSTHROUGH, KIND_PEN, KIND_TOUCH, ABS_MT_POSITION_X,
-    ABS_MT_POSITION_Y, ABS_X, ABS_Y, REL_HWHEEL, REL_WHEEL, REL_X, REL_Y, SYN_REPORT, TOUCH_RANGE,
+    Event, EV_ABS, EV_KEY, EV_REL, EV_SYN, KIND_GAMEPAD, KIND_GAMEPAD_CONNECT,
+    KIND_GAMEPAD_DISCONNECT, KIND_KEYBOARD, KIND_MOUSE, KIND_MOUSE_ABSOLUTE, KIND_PASSTHROUGH,
+    KIND_PEN, KIND_TOUCH, ABS_MT_POSITION_X, ABS_MT_POSITION_Y, ABS_X, ABS_Y, TOUCH_RANGE,
 };
 
 #[repr(C)]
@@ -64,17 +73,41 @@ static SOCKET: Mutex<Option<UnixStream>> = Mutex::new(None);
 static FAKES: OnceLock<Mutex<HashSet<usize>>> = OnceLock::new();
 static SHIM_SYSPATH: &[u8] = b"/sys/class/input/event-vulcan\0";
 
+/// Clears `LD_PRELOAD` before Apollo spawns its helpers.
+///
+/// Apollo runs the game and its wine processes as children; leaving the
+/// variable set would load the shim into every one of them. Constructors run
+/// before `main` and while the process is still single threaded, so touching
+/// the environment here is safe even though `unsetenv` is not async-signal
+/// safe.
 unsafe extern "C" fn unset_preload() {
-    libc::unsetenv(c"LD_PRELOAD".as_ptr());
+    // SAFETY: the pointer comes from a static NUL terminated literal.
+    unsafe { libc::unsetenv(c"LD_PRELOAD".as_ptr()) };
 }
 
 #[used]
 #[link_section = ".init_array"]
 static UNSET_PRELOAD: unsafe extern "C" fn() = unset_preload;
 
-unsafe fn symbol(handle: *mut c_void, name: &str) -> *mut c_void {
-    let name = CString::new(name).unwrap_or_default();
-    libc::dlsym(handle, name.as_ptr())
+/// Resolves one symbol and casts it to the expected C function pointer.
+///
+/// `dlsym` returns a data pointer; the cast is sound only while function
+/// pointers and data pointers share a size, which holds on the supported
+/// Linux targets and is checked at runtime here.
+unsafe fn symbol_fn<T: Copy>(handle: *mut c_void, name: &str) -> Option<T> {
+    if std::mem::size_of::<T>() != std::mem::size_of::<*mut c_void>() {
+        return None;
+    }
+    let name = CString::new(name).ok()?;
+    // SAFETY: `handle` comes from a successful `dlopen` and `name` is a live
+    // CString for the duration of the call.
+    let pointer = unsafe { libc::dlsym(handle, name.as_ptr()) };
+    if pointer.is_null() {
+        return None;
+    }
+    // SAFETY: `pointer` is non-null and the size check above guarantees `T`
+    // has the same representation as the pointer it is read from.
+    Some(unsafe { std::mem::transmute_copy(&pointer) })
 }
 
 fn fakes() -> &'static Mutex<HashSet<usize>> {
@@ -82,58 +115,61 @@ fn fakes() -> &'static Mutex<HashSet<usize>> {
 }
 
 fn register_fake(pointer: *mut libevdev_uinput) {
-    if let Ok(mut set) = fakes().lock() {
-        set.insert(pointer as usize);
-    }
+    let mut set = fakes()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    set.insert(pointer as usize);
 }
 
+/// Reports whether the pointer was handed out by this shim.
+///
+/// The registry is checked instead of a tag stored in the allocation because
+/// the pointer may belong to the real libevdev, and reading a foreign
+/// allocation to discover that would be undefined behavior. The trade-off is
+/// that an address reused after `libevdev_uinput_destroy` cannot be told apart
+/// from a live fake; the destroy path removes the entry, so a reused address is
+/// never treated as a fake.
 fn is_fake(pointer: *const libevdev_uinput) -> bool {
-    fakes()
+    let set = fakes()
         .lock()
-        .map(|set| set.contains(&(pointer as usize)))
-        .unwrap_or(false)
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    set.contains(&(pointer as usize))
 }
 
 fn take_fake(pointer: *mut libevdev_uinput) -> bool {
-    fakes()
+    let mut set = fakes()
         .lock()
-        .map(|mut set| set.remove(&(pointer as usize)))
-        .unwrap_or(false)
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    set.remove(&(pointer as usize))
 }
 
 fn real() -> Option<&'static Real> {
-    REAL.get_or_init(|| unsafe {
-        let handle = libc::dlopen(
-            c"libevdev.so.2".as_ptr(),
-            libc::RTLD_LAZY | libc::RTLD_LOCAL,
-        );
+    REAL.get_or_init(|| {
+        // SAFETY: `dlopen` only reads the static name and returns either a
+        // handle or null, which is checked immediately.
+        let handle = unsafe {
+            libc::dlopen(
+                c"libevdev.so.2".as_ptr(),
+                libc::RTLD_LAZY | libc::RTLD_LOCAL,
+            )
+        };
         if handle.is_null() {
             return None;
         }
-        let create = symbol(handle, "libevdev_uinput_create_from_device");
-        let destroy = symbol(handle, "libevdev_uinput_destroy");
-        let get_fd = symbol(handle, "libevdev_uinput_get_fd");
-        let get_devnode = symbol(handle, "libevdev_uinput_get_devnode");
-        let get_syspath = symbol(handle, "libevdev_uinput_get_syspath");
-        let write = symbol(handle, "libevdev_uinput_write_event");
-        let get_name = symbol(handle, "libevdev_get_name");
-        let get_abs_info = symbol(handle, "libevdev_get_abs_info");
-        if create.is_null() || destroy.is_null() || get_fd.is_null() || get_devnode.is_null()
-            || get_syspath.is_null() || write.is_null() || get_name.is_null()
-            || get_abs_info.is_null()
-        {
-            return None;
+        // SAFETY: `handle` is a live library handle and every name is a static
+        // literal; `symbol_fn` keeps the cast sound on the supported targets.
+        unsafe {
+            Some(Real {
+                create: symbol_fn(handle, "libevdev_uinput_create_from_device")?,
+                destroy: symbol_fn(handle, "libevdev_uinput_destroy")?,
+                get_fd: symbol_fn(handle, "libevdev_uinput_get_fd")?,
+                get_devnode: symbol_fn(handle, "libevdev_uinput_get_devnode")?,
+                get_syspath: symbol_fn(handle, "libevdev_uinput_get_syspath")?,
+                write: symbol_fn(handle, "libevdev_uinput_write_event")?,
+                get_name: symbol_fn(handle, "libevdev_get_name")?,
+                get_abs_info: symbol_fn(handle, "libevdev_get_abs_info")?,
+            })
         }
-        Some(Real {
-            create: std::mem::transmute(create),
-            destroy: std::mem::transmute(destroy),
-            get_fd: std::mem::transmute(get_fd),
-            get_devnode: std::mem::transmute(get_devnode),
-            get_syspath: std::mem::transmute(get_syspath),
-            write: std::mem::transmute(write),
-            get_name: std::mem::transmute(get_name),
-            get_abs_info: std::mem::transmute(get_abs_info),
-        })
     })
     .as_ref()
 }
@@ -151,10 +187,12 @@ fn is_apollo() -> bool {
 }
 
 fn device_name(dev: *const libevdev) -> String {
+    let Some(real) = real() else {
+        return String::new();
+    };
+    // SAFETY: `dev` is the libevdev device Apollo passed to the create call and
+    // stays owned by Apollo for the duration of the call.
     unsafe {
-        let Some(real) = real() else {
-            return String::new();
-        };
         let name = (real.get_name)(dev);
         if name.is_null() {
             return String::new();
@@ -164,10 +202,12 @@ fn device_name(dev: *const libevdev) -> String {
 }
 
 fn abs_max(dev: *const libevdev, code: c_uint) -> i32 {
+    let Some(real) = real() else {
+        return 0;
+    };
+    // SAFETY: `dev` is the libevdev device Apollo passed to the create call; the
+    // returned info pointer belongs to that device and is checked for null.
     unsafe {
-        let Some(real) = real() else {
-            return 0;
-        };
         let info = (real.get_abs_info)(dev, code);
         if info.is_null() || (*info).maximum <= 0 {
             0
@@ -228,6 +268,11 @@ fn socket_path() -> Option<String> {
     path
 }
 
+/// Sends one event to the session socket.
+///
+/// The socket is non-blocking so a stalled consumer cannot stall the game. A
+/// short write would desynchronize the 9-byte framing, so the connection is
+/// dropped instead of retried; the next event reconnects with a clean stream.
 fn send_event(event: Event) {
     let mut guard = match SOCKET.lock() {
         Ok(guard) => guard,
@@ -240,6 +285,9 @@ fn send_event(event: Event) {
         };
         match UnixStream::connect(path) {
             Ok(stream) => {
+                if stream.set_nonblocking(true).is_err() {
+                    return;
+                }
                 *guard = Some(stream);
             }
             Err(_) => return,
@@ -247,32 +295,59 @@ fn send_event(event: Event) {
     }
 
     if let Some(stream) = guard.as_mut() {
-        if let Err(error) = event.write_to(stream) {
-            if error.kind() != std::io::ErrorKind::WouldBlock {
-                *guard = None;
+        let bytes = event.to_bytes();
+        let mut drop_stream = false;
+        loop {
+            match stream.write(&bytes) {
+                Ok(written) if written == vulcan_input_proto::WIRE_LEN => break,
+                // The buffer is full; the event is dropped on purpose.
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
+                // No bytes were written, so the frame can be retried.
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                // A short or failed write leaves unusable framing behind.
+                _ => {
+                    drop_stream = true;
+                    break;
+                }
             }
+        }
+        if drop_stream {
+            *guard = None;
         }
     }
 }
 
+/// Creates the device Apollo asked for, or forwards the call unchanged.
+///
+/// # Safety
+///
+/// `dev` must be a live libevdev device and `uidev` a valid pointer to write
+/// the resulting handle to. The shim is called this way through `LD_PRELOAD`.
 #[no_mangle]
 pub unsafe extern "C" fn libevdev_uinput_create_from_device(
     dev: *const libevdev,
     fd: c_int,
     uidev: *mut *mut libevdev_uinput,
 ) -> c_int {
+    if uidev.is_null() {
+        return -libc::EINVAL;
+    }
     let Some(real) = real() else {
         return -libc::EIO;
     };
 
     if !is_apollo() {
-        return (real.create)(dev, fd, uidev);
+        // SAFETY: the arguments are the ones Apollo passed through; this is a
+        // pure forward of the call to the real implementation.
+        return unsafe { (real.create)(dev, fd, uidev) };
     }
 
     let kind = classify(&device_name(dev));
     if kind == KIND_PASSTHROUGH {
         let mut real_device: *mut libevdev_uinput = std::ptr::null_mut();
-        let result = (real.create)(dev, fd, &mut real_device);
+        // SAFETY: `dev` and `fd` come from Apollo and `real_device` points to a
+        // local that outlives the call.
+        let result = unsafe { (real.create)(dev, fd, &mut real_device) };
         if result != 0 || real_device.is_null() {
             return result;
         }
@@ -283,7 +358,8 @@ pub unsafe extern "C" fn libevdev_uinput_create_from_device(
             abs_max_x: 0,
             abs_max_y: 0,
         });
-        if !uidev.is_null() {
+        // SAFETY: `uidev` was checked non-null above.
+        unsafe {
             let raw = Box::into_raw(fake) as *mut libevdev_uinput;
             register_fake(raw);
             *uidev = raw;
@@ -299,7 +375,9 @@ pub unsafe extern "C" fn libevdev_uinput_create_from_device(
         abs_max_y: abs_max(dev, ABS_Y as c_uint),
     });
 
-    if !uidev.is_null() {
+    // SAFETY: `uidev` was checked non-null above; the box is intentionally
+    // leaked into the handle Apollo owns and is freed by the destroy call.
+    unsafe {
         let raw = Box::into_raw(fake) as *mut libevdev_uinput;
         register_fake(raw);
         *uidev = raw;
@@ -315,6 +393,12 @@ pub unsafe extern "C" fn libevdev_uinput_create_from_device(
     0
 }
 
+/// Releases a handle created by this shim or by the real libevdev.
+///
+/// # Safety
+///
+/// `uidev` must be a handle returned by `libevdev_uinput_create_from_device`
+/// and must not be used afterwards. A null pointer is ignored.
 #[no_mangle]
 pub unsafe extern "C" fn libevdev_uinput_destroy(uidev: *mut libevdev_uinput) {
     if uidev.is_null() {
@@ -322,14 +406,18 @@ pub unsafe extern "C" fn libevdev_uinput_destroy(uidev: *mut libevdev_uinput) {
     }
 
     if !take_fake(uidev) {
-        /* libevdev's own create error path calls destroy on a real handle. */
+        // libevdev's own create error path calls destroy on a real handle.
         if let Some(real) = real() {
-            (real.destroy)(uidev);
+            // SAFETY: the pointer was not created by this shim, so it belongs
+            // to the real libevdev.
+            unsafe { (real.destroy)(uidev) };
         }
         return;
     }
 
-    let fake = Box::from_raw(uidev as *mut Fake);
+    // SAFETY: the registry only holds pointers produced by `Box::into_raw` in
+    // the create call, which are removed by `take_fake` exactly once.
+    let fake = unsafe { Box::from_raw(uidev as *mut Fake) };
     if fake.kind == KIND_GAMEPAD && fake.real.is_null() {
         send_event(Event {
             kind: KIND_GAMEPAD_DISCONNECT,
@@ -340,69 +428,102 @@ pub unsafe extern "C" fn libevdev_uinput_destroy(uidev: *mut libevdev_uinput) {
     }
     if !fake.real.is_null() {
         if let Some(real) = real() {
-            (real.destroy)(fake.real);
+            // SAFETY: `fake.real` is the handle the real create call returned.
+            unsafe { (real.destroy)(fake.real) };
         }
     }
 }
 
+/// Returns the event file descriptor behind a handle.
+///
+/// # Safety
+///
+/// `uidev` must be a live handle returned by the create call.
 #[no_mangle]
 pub unsafe extern "C" fn libevdev_uinput_get_fd(uidev: *const libevdev_uinput) -> c_int {
     if !is_fake(uidev) {
         return match real() {
-            Some(real) => (real.get_fd)(uidev),
+            // SAFETY: the pointer is not a shim handle, so it belongs to the
+            // real libevdev.
+            Some(real) => unsafe { (real.get_fd)(uidev) },
             None => -1,
         };
     }
-    let fake = &*(uidev as *const Fake);
+    // SAFETY: `is_fake` matched, so the pointer is a live `Fake`.
+    let fake = unsafe { &*(uidev as *const Fake) };
     if fake.real.is_null() {
         return -1;
     }
     match real() {
-        Some(real) => (real.get_fd)(fake.real),
+        // SAFETY: `fake.real` is a live libevdev handle.
+        Some(real) => unsafe { (real.get_fd)(fake.real) },
         None => -1,
     }
 }
 
+/// Returns the device node path of a handle.
+///
+/// # Safety
+///
+/// `uidev` must be a live handle. The returned pointer is borrowed from the
+/// handle and stays valid only until the handle is destroyed.
 #[no_mangle]
 pub unsafe extern "C" fn libevdev_uinput_get_devnode(
     uidev: *mut libevdev_uinput,
 ) -> *const c_char {
     if !is_fake(uidev) {
         return match real() {
-            Some(real) => (real.get_devnode)(uidev),
+            // SAFETY: foreign handle, resolved from the real libevdev.
+            Some(real) => unsafe { (real.get_devnode)(uidev) },
             None => std::ptr::null(),
         };
     }
-    let fake = &*(uidev as *const Fake);
+    // SAFETY: `is_fake` matched, so the pointer is a live `Fake`.
+    let fake = unsafe { &*(uidev as *const Fake) };
     if fake.real.is_null() {
         return fake.devnode.as_ptr();
     }
     match real() {
-        Some(real) => (real.get_devnode)(fake.real),
+        // SAFETY: `fake.real` is a live libevdev handle.
+        Some(real) => unsafe { (real.get_devnode)(fake.real) },
         None => std::ptr::null(),
     }
 }
 
+/// Returns the sysfs path of a handle.
+///
+/// # Safety
+///
+/// `uidev` must be a live handle. The returned pointer is borrowed from the
+/// handle and stays valid only until the handle is destroyed.
 #[no_mangle]
 pub unsafe extern "C" fn libevdev_uinput_get_syspath(
     uidev: *mut libevdev_uinput,
 ) -> *const c_char {
     if !is_fake(uidev) {
         return match real() {
-            Some(real) => (real.get_syspath)(uidev),
+            // SAFETY: foreign handle, resolved from the real libevdev.
+            Some(real) => unsafe { (real.get_syspath)(uidev) },
             None => std::ptr::null(),
         };
     }
-    let fake = &*(uidev as *const Fake);
+    // SAFETY: `is_fake` matched, so the pointer is a live `Fake`.
+    let fake = unsafe { &*(uidev as *const Fake) };
     if fake.real.is_null() {
         return SHIM_SYSPATH.as_ptr() as *const c_char;
     }
     match real() {
-        Some(real) => (real.get_syspath)(fake.real),
+        // SAFETY: `fake.real` is a live libevdev handle.
+        Some(real) => unsafe { (real.get_syspath)(fake.real) },
         None => std::ptr::null(),
     }
 }
 
+/// Writes one event to the device, translating it for the proxy.
+///
+/// # Safety
+///
+/// `uidev` must be a live handle returned by the create call.
 #[no_mangle]
 pub unsafe extern "C" fn libevdev_uinput_write_event(
     uidev: *const libevdev_uinput,
@@ -412,14 +533,17 @@ pub unsafe extern "C" fn libevdev_uinput_write_event(
 ) -> c_int {
     if !is_fake(uidev) {
         return match real() {
-            Some(real) => (real.write)(uidev, event_type, code, value),
+            // SAFETY: foreign handle, resolved from the real libevdev.
+            Some(real) => unsafe { (real.write)(uidev, event_type, code, value) },
             None => -libc::EIO,
         };
     }
-    let fake = &*(uidev as *const Fake);
+    // SAFETY: `is_fake` matched, so the pointer is a live `Fake`.
+    let fake = unsafe { &*(uidev as *const Fake) };
     if !fake.real.is_null() {
         return match real() {
-            Some(real) => (real.write)(fake.real, event_type, code, value),
+            // SAFETY: `fake.real` is a live libevdev handle.
+            Some(real) => unsafe { (real.write)(fake.real, event_type, code, value) },
             None => -libc::EIO,
         };
     }
@@ -438,6 +562,8 @@ pub unsafe extern "C" fn libevdev_uinput_write_event(
 
     let mut value = value;
     if fake.kind == KIND_MOUSE_ABSOLUTE && event_type as u16 == EV_ABS {
+        // Gamescope resolves absolute pointer coordinates in screen pixels,
+        // while touch uses the wire range. Keep the two conversions separate.
         let (width, height) = screen_size();
         let (maximum, size) = if code as u16 == ABS_X {
             (fake.abs_max_x, width)
@@ -465,7 +591,7 @@ pub unsafe extern "C" fn libevdev_uinput_write_event(
     0
 }
 
-/// Converts a touch axis value to the wire range.
+/// Converts an evdev axis value to the wire range.
 ///
 /// The protocol is resolution independent, so slot, tracking id, pressure and
 /// orientation values pass through unchanged with `maximum` of zero.
@@ -475,6 +601,20 @@ fn scale_touch(value: i32, maximum: i32) -> i32 {
     }
     let value = i64::from(value).clamp(0, i64::from(maximum));
     (value * i64::from(TOUCH_RANGE) / i64::from(maximum)) as i32
+}
+
+fn screen_size() -> (i32, i32) {
+    let width = std::env::var("GAME_WIDTH")
+        .ok()
+        .and_then(|value| value.parse::<i32>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(1920);
+    let height = std::env::var("GAME_HEIGHT")
+        .ok()
+        .and_then(|value| value.parse::<i32>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(1080);
+    (width, height)
 }
 
 fn touch_event(fake: &Fake, event_type: c_uint, code: c_uint, value: c_int) -> Event {
@@ -494,31 +634,6 @@ fn touch_event(fake: &Fake, event_type: c_uint, code: c_uint, value: c_int) -> E
         value,
     }
 }
-
-fn screen_size() -> (i32, i32) {
-    let width = std::env::var("GAME_WIDTH")
-        .ok()
-        .and_then(|value| value.parse::<i32>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(1920);
-    let height = std::env::var("GAME_HEIGHT")
-        .ok()
-        .and_then(|value| value.parse::<i32>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(1080);
-    (width, height)
-}
-
-/* Keep the constants referenced so the protocol header stays authoritative
- * even if the compiler would otherwise trim unused items. */
-#[used]
-static _TYPE_CHECKS: [u16; 10] = [
-    EV_SYN, EV_KEY, EV_REL, EV_ABS, SYN_REPORT, REL_X, REL_Y, REL_WHEEL, ABS_X, ABS_Y,
-];
-#[used]
-static _BUTTONS: [u16; 2] = [BTN_MISC, BTN_TASK];
-#[used]
-static _EXTRA: [u16; 1] = [REL_HWHEEL];
 
 #[cfg(test)]
 mod tests {

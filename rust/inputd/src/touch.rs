@@ -33,6 +33,12 @@ pub struct Tracker {
     slots: [Slot; MAX_SLOTS],
 }
 
+impl Default for Tracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Tracker {
     pub fn new() -> Self {
         Self {
@@ -283,6 +289,14 @@ mod tests {
         assert_eq!(actions.len(), 2);
         assert!(matches!(actions[0], TouchAction::Up { slot: 0 }));
         assert!(matches!(actions[1], TouchAction::Down { slot: 0, .. }));
+    }
+
+    #[test]
+    fn wire_coordinates_map_onto_the_region() {
+        assert_eq!(region(0), 0.0);
+        assert!(close(region(TOUCH_RANGE), f64::from(i32::MAX)));
+        assert_eq!(region(-1), 0.0);
+        assert!(close(region(TOUCH_RANGE + 10), f64::from(i32::MAX)));
     }
 
     #[test]
