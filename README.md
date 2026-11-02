@@ -44,26 +44,32 @@ which is not available in this container.
 - [Reproducible builds](#reproducible-builds)
 - [Configuration](#configuration)
   - [Game catalog](#game-catalog)
+  - [Game directories and overlays](#game-directories-and-overlays)
   - [Sessions](#sessions)
-  - [Recreating a Wine prefix](#recreating-a-wine-prefix)
-  - [Migrating from per-game presets](#migrating-from-per-game-presets)
+  - [Session data location](#session-data-location)
   - [Ports](#ports)
 - [Fresh deployment](#fresh-deployment)
   - [NVIDIA devices](#nvidia-devices)
   - [AMD and Intel](#amd-and-intel)
 - [Display and game](#display-and-game)
+  - [Sway and Xwayland](#sway-and-xwayland)
   - [OBS capture](#obs-capture)
   - [OBS audio](#obs-audio)
     - [Audio from Apollo stream](#audio-from-apollo-stream)
     - [Audio without Apollo](#audio-without-apollo)
   - [Wine environment](#wine-environment)
   - [GPU path](#gpu-path)
-- [Read-only game directories](#read-only-game-directories)
 - [Input](#input)
   - [Cursor](#cursor)
   - [Gamepad](#gamepad)
   - [Multi-touch](#multi-touch)
   - [Session isolation](#session-isolation)
+- [Logs](#logs)
+- [Maintenance](#maintenance)
+  - [Session cleanup](#session-cleanup)
+  - [Updating game files](#updating-game-files)
+  - [Recreating a Wine prefix](#recreating-a-wine-prefix)
+  - [Migrating from per-game presets](#migrating-from-per-game-presets)
 - [Security](#security)
 - [Limitations](#limitations)
 - [Validation checklist](#validation-checklist)
@@ -220,6 +226,38 @@ an app starts `launch-game.sh <id>`, which resolves that game's overlay, Wine
 prefix, and reset paths. The container runs one game at a time; a second app
 start exits while the first holds the session lock.
 
+### Game directories and overlays
+
+Each catalog game is mounted read-only at `/games-ro/<id>`. An overlay inside
+the container presents a writable view at `/games/<id>`:
+
+- lower: `/games-ro/<id>`
+- upper/work: `/data/overlay/<id>`
+- host files are never modified
+- game writes, `config.ini`, logs and launcher-generated files stay in the
+  container volume
+
+Only the directories listed in `games.yaml` are mounted. The generated Compose
+override adds one bind mount per game; there is no shared game root.
+
+A host game directory can also contain state written outside the container,
+including stored logins under `Data/Login` and cached credentials under
+`Data/Cache`. Because it is the lower layer, a fresh volume still starts
+signed in. The catalog `reset_paths` field lists game-relative paths to remove
+once per Wine prefix; removals land in the overlay upper layer and the host
+files stay untouched. A changed field takes effect on a fresh prefix, or after
+`make clean-overlay` clears the marker.
+
+The session data volume contains one prefix and one overlay per game:
+
+```text
+/data/prefix/<id>
+/data/overlay/<id>
+```
+
+The overlay mount requires `CAP_SYS_ADMIN`, which is granted to the entrypoint.
+The game runs as a non-root user without that capability.
+
 ### Sessions
 
 `P` selects one preset or a colon-separated list. The value is a path relative
@@ -293,57 +331,6 @@ it only after the copy is verified.
 
 `make uninstall` leaves a host data directory in place. Remove the volume
 metadata and the directory manually after verifying the backup.
-
-### Recreating a Wine prefix
-
-A game that hangs or crashes before its first frame, while the same game files
-work outside the container, may have a corrupted Wine prefix. Reset one game
-without touching the others:
-
-```bash
-docker exec -u game vulcan-<session> sh -c \
-  'mv /data/prefix/<id> /data/prefix/<id>.bak-$(date +%Y%m%d_%H%M%S)'
-```
-
-Start the app again. `launch-game.sh` runs `wineboot --init` and recreates the
-prefix, DXVK files, and XInput proxies for the next launch. Online progress is
-stored on the game server; local settings may reset.
-
-To keep local settings and the device ID, initialize the new prefix first and
-then copy user data from the backup:
-
-```bash
-docker exec -u game vulcan-<session> sh -c '
-  old=/data/prefix/<id>.bak-<timestamp>
-  new=/data/prefix/<id>
-  cp -a "$old/user.reg" "$new/user.reg"
-  cp -a "$old/drive_c/users/<user>/AppData/LocalLow/<vendor>" \
-        "$new/drive_c/users/<user>/AppData/LocalLow/"
-'
-```
-
-Copy only user data. Do not copy `system.reg`, `drive_c/windows`, or driver and
-service files from a prefix suspected to be corrupt; they can carry the fault
-into the new prefix. Remove the backup after a game has launched from the new
-prefix.
-
-### Migrating from per-game presets
-
-Per-game presets are not read by this version. Create `.env.multi` and
-`games.yaml` instead. Old volumes remain on the host; the new session uses
-`vulcan_<SESSION_ID>-data`.
-
-To keep an old Wine prefix, copy it into the new volume before the first
-launch:
-
-```bash
-docker run --rm -v vulcan_<old_game>-data:/old \
-  -v vulcan_<SESSION_ID>-data:/new \
-  alpine sh -c 'mkdir -p /new/prefix/<id> && cp -a /old/prefix/. /new/prefix/<id>/'
-```
-
-The overlay can be rebuilt from the host game directory; copy it only if the
-container had local writes that must survive.
 
 ### Ports
 
@@ -515,6 +502,25 @@ Defaults:
 Set `APOLLO_NAME` to override the host name (`Vulcan-<SESSION_ID>` by
 default). `GAMESCOPE_RT=1` passes `--rt` to gamescope;
 `GAMESCOPE_FORCE_WINDOWS_FULLSCREEN=0` disables its fullscreen flag.
+
+### Sway and Xwayland
+
+Sway runs with `WLR_BACKENDS=headless`. Pointer and keyboard input reaches the
+game through gamescope EIS, so Sway has no input device and does not draw the
+streamed cursor.
+
+`SWAY_RENDERER` selects the wlroots renderer (`gles2` or `pixman`), and
+`SWAY_ALLOW_SOFTWARE=0` disables the pixman fallback. On the tested NVIDIA
+headless session, forcing `gles2` keeps a backend DRM FD so gamescope can use
+its DMA-BUF path; without it Sway logs `Failed to get backend DRM FD` on each
+client connection and falls back to shared memory. The sample preset leaves
+both unset; the tested session uses GLES2 without the software fallback.
+
+Sway does not start Xwayland while gamescope is enabled: gamescope runs its
+own X server for Wine, and Sway's instance would only compete for the abstract
+X11 socket names that the host already owns, because the container uses the
+host network namespace. `GAMESCOPE_ENABLED=0` re-enables Xwayland for the
+direct Sway path.
 
 ### OBS capture
 
@@ -700,60 +706,6 @@ through gamescope's EIS socket and gamescope composites the streamed cursor.
 With `GAMESCOPE_ENABLED=0` the game renders directly under Sway, but the
 container then has neither pointer/keyboard input nor a streamed cursor.
 
-## Read-only game directories
-
-Each catalog game is mounted read-only at `/games-ro/<id>`. An overlay inside
-the container presents a writable view at `/games/<id>`:
-
-- lower: `/games-ro/<id>`
-- upper/work: `/data/overlay/<id>`
-- host files are never modified
-- game writes, `config.ini`, logs and launcher-generated files stay in the
-  container volume
-
-Only the directories listed in `games.yaml` are mounted. The generated Compose
-override adds one bind mount per game; there is no shared game root.
-
-A host game directory can also contain state written outside the container,
-including stored logins under `Data/Login` and cached credentials under
-`Data/Cache`. Because it is the lower layer, a fresh volume still starts
-signed in. The catalog `reset_paths` field lists game-relative paths to remove
-once per Wine prefix; removals land in the overlay upper layer and the host
-files stay untouched. A changed field takes effect on a fresh prefix, or after
-`make clean-overlay` clears the marker.
-
-The session data volume contains one prefix and one overlay per game:
-
-```text
-/data/prefix/<id>
-/data/overlay/<id>
-```
-
-Session cleanup targets remove parts of the volume and keep Apollo state:
-
-| Target | Removes |
-| --- | --- |
-| `make clean-logs` | `/data/log/*` |
-| `make clean-overlay` | `/data/overlay/*/{upper,work}/*` and `/data/prefix/*/.vulcan-reset-paths` |
-| `make clean-appdata` | `/data/prefix/*/drive_c/users/*/AppData` |
-| `make clean-all` | all of the above |
-
-Each target stops the container, removes its paths, and starts the container
-again. `clean-overlay` also drops the reset markers: the fresh overlays no
-longer hold the whiteouts from the previous reset, so the next launch applies
-the catalog `reset_paths` again. Use it after the host changes files the
-container had already written, since the overlay keeps the container's copy
-until it is removed.
-
-The overlay mount requires `CAP_SYS_ADMIN`, which is granted to the entrypoint.
-The game runs as a non-root user without that capability.
-
-To update a game, stop the container and run the updater/launcher outside the
-streaming container, or start a separate maintenance container with a
-read-write mount. Do not expose a read-write game directory while streaming.
-Run `make clean-overlay` afterwards so the container stops using the copies it
-wrote into its overlay and reads the updated tree.
-
 ## Input
 
 `INPUT_TRANSPORT=socket` is the only supported path. Apollo's libevdev
@@ -766,6 +718,9 @@ Pointer and keyboard path:
 Apollo -> libvulcan_uinput_shim.so -> /run/user/1000/vulcan-input.sock
        -> vulcan-inputd -> gamescope EIS -> Xwayland -> Wine
 ```
+
+The input socket is `/run/user/1000/vulcan-input.sock`; `/run` is a tmpfs, so
+the socket exists only while the container runs.
 
 `vulcan-inputd` starts emulating as soon as gamescope creates the EIS device
 and reads `device.resumed` before it sends input; libei rejects events for a
@@ -808,9 +763,6 @@ through a per-prefix symlink. The file lives in the
 `vulcan_<SESSION_ID>-data` volume and is shared by the catalog games because
 only one game runs at a time.
 
-The input socket is `/run/user/1000/vulcan-input.sock`; `/run` is a tmpfs, so
-the socket exists only while the container runs.
-
 `launch-game.sh` installs the native XInput DLL for both architectures and
 sets `WINEDLLOVERRIDES`. The 64-bit DLL goes to
 `drive_c/windows/system32`, the 32-bit DLL to `drive_c/windows/syswow64`,
@@ -850,24 +802,6 @@ resolves a relative path; `launch-game.sh` logs a warning and leaves rumble
 disabled when the directory is missing. The reader is applied to the default
 `apollo-git` build; a different `APOLLO_PKG` builds without it.
 
-Sway runs with `WLR_BACKENDS=headless`. `GAMESCOPE_TOUCH_MODE` controls
-gamescope's touch handling. Pointer and keyboard input reaches the game
-through gamescope EIS, so Sway has no input device and does not draw the
-streamed cursor.
-
-`SWAY_RENDERER` selects the wlroots renderer (`gles2` or `pixman`), and
-`SWAY_ALLOW_SOFTWARE=0` disables the pixman fallback. On the tested NVIDIA
-headless session, forcing `gles2` keeps a backend DRM FD so gamescope can use
-its DMA-BUF path; without it Sway logs `Failed to get backend DRM FD` on each
-client connection and falls back to shared memory. The sample preset leaves
-both unset; the tested session uses GLES2 without the software fallback.
-
-Sway does not start Xwayland while gamescope is enabled: gamescope runs its
-own X server for Wine, and Sway's instance would only compete for the abstract
-X11 socket names that the host already owns, because the container uses the
-host network namespace. `GAMESCOPE_ENABLED=0` re-enables Xwayland for the
-direct Sway path.
-
 ### Multi-touch
 
 The shim forwards the `ABS_MT` sequence from Apollo's touch device and
@@ -878,7 +812,20 @@ forwarding path becomes active once gamescope advertises the capability; until
 then keep the client in a mouse mode, where touch arrives as absolute mouse
 events.
 
-Logs:
+`GAMESCOPE_TOUCH_MODE` controls gamescope's touch handling.
+
+### Session isolation
+
+Each container owns its input socket, runtime directory, and gamescope
+instance, so two presets can stream at the same time without sharing input.
+The shim sends events to `VULCAN_INPUT_SOCKET` and `vulcan-inputd` connects to
+the EIS socket of its own gamescope. Set `VULCAN_EIS_SOCKET` to override the
+discovered path.
+
+No input device is created in the host kernel, so neither session can see or
+grab the other's devices.
+
+## Logs
 
 ```bash
 docker compose --env-file .env.local exec game tail -f /data/apollo/sunshine.log
@@ -892,16 +839,84 @@ holds the session startup and Apollo console output; `sway.log` holds Sway only.
 `APOLLO_LOG_LEVEL` defaults to `2` (info); `0` and `1` enable verbose/debug
 logging and grow quickly during streaming.
 
-### Session isolation
+## Maintenance
 
-Each container owns its input socket, runtime directory, and gamescope
-instance, so two presets can stream at the same time without sharing input.
-The shim sends events to `VULCAN_INPUT_SOCKET` and `vulcan-inputd` connects to
-the EIS socket of its own gamescope. Set `VULCAN_EIS_SOCKET` to override the
-discovered path.
+### Session cleanup
 
-No input device is created in the host kernel, so neither session can see or
-grab the other's devices.
+Session cleanup targets remove parts of the volume and keep Apollo state:
+
+| Target | Removes |
+| --- | --- |
+| `make clean-logs` | `/data/log/*` |
+| `make clean-overlay` | `/data/overlay/*/{upper,work}/*` and `/data/prefix/*/.vulcan-reset-paths` |
+| `make clean-appdata` | `/data/prefix/*/drive_c/users/*/AppData` |
+| `make clean-all` | all of the above |
+
+Each target stops the container, removes its paths, and starts the container
+again. `clean-overlay` also drops the reset markers: the fresh overlays no
+longer hold the whiteouts from the previous reset, so the next launch applies
+the catalog `reset_paths` again. Use it after the host changes files the
+container had already written, since the overlay keeps the container's copy
+until it is removed.
+
+### Updating game files
+
+To update a game, stop the container and run the updater/launcher outside the
+streaming container, or start a separate maintenance container with a
+read-write mount. Do not expose a read-write game directory while streaming.
+Run `make clean-overlay` afterwards so the container stops using the copies it
+wrote into its overlay and reads the updated tree.
+
+### Recreating a Wine prefix
+
+A game that hangs or crashes before its first frame, while the same game files
+work outside the container, may have a corrupted Wine prefix. Reset one game
+without touching the others:
+
+```bash
+docker exec -u game vulcan-<session> sh -c \
+  'mv /data/prefix/<id> /data/prefix/<id>.bak-$(date +%Y%m%d_%H%M%S)'
+```
+
+Start the app again. `launch-game.sh` runs `wineboot --init` and recreates the
+prefix, DXVK files, and XInput proxies for the next launch. Online progress is
+stored on the game server; local settings may reset.
+
+To keep local settings and the device ID, initialize the new prefix first and
+then copy user data from the backup:
+
+```bash
+docker exec -u game vulcan-<session> sh -c '
+  old=/data/prefix/<id>.bak-<timestamp>
+  new=/data/prefix/<id>
+  cp -a "$old/user.reg" "$new/user.reg"
+  cp -a "$old/drive_c/users/<user>/AppData/LocalLow/<vendor>" \
+        "$new/drive_c/users/<user>/AppData/LocalLow/"
+'
+```
+
+Copy only user data. Do not copy `system.reg`, `drive_c/windows`, or driver and
+service files from a prefix suspected to be corrupt; they can carry the fault
+into the new prefix. Remove the backup after a game has launched from the new
+prefix.
+
+### Migrating from per-game presets
+
+Per-game presets are not read by this version. Create `.env.multi` and
+`games.yaml` instead. Old volumes remain on the host; the new session uses
+`vulcan_<SESSION_ID>-data`.
+
+To keep an old Wine prefix, copy it into the new volume before the first
+launch:
+
+```bash
+docker run --rm -v vulcan_<old_game>-data:/old \
+  -v vulcan_<SESSION_ID>-data:/new \
+  alpine sh -c 'mkdir -p /new/prefix/<id> && cp -a /old/prefix/. /new/prefix/<id>/'
+```
+
+The overlay can be rebuilt from the host game directory; copy it only if the
+container had local writes that must survive.
 
 ## Security
 
