@@ -3,20 +3,35 @@
 #
 # The base image is built once per host from docker/base.Dockerfile, so a
 # change here rebuilds only the stages it touches.
+#
+# NVIDIA runtime libraries and device nodes come from the host container
+# toolkit through CDI.
 ARG BASE_IMAGE=vulcan/base:local
 
 FROM ${BASE_IMAGE} AS game-base
 
 ARG GPU_VENDOR=nvidia
 
-RUN if [ "$GPU_VENDOR" = "nvidia" ]; then \
-        /usr/local/bin/fetch-heavy nvidia-utils; \
-        pacman -S --noconfirm --needed --disable-download-timeout nvidia-utils; \
+# The image carries the AMD/Intel userspace drivers. NVIDIA libraries are
+# injected at runtime by the host toolkit.
+RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
+    if [ "$GPU_VENDOR" = "nvidia" ]; then \
+        printf '%s\n' 'NVIDIA runtime libraries come from the host toolkit'; \
     else \
         pacman -S --noconfirm --needed --disable-download-timeout vulkan-radeon libva-mesa-driver; \
     fi
 
-FROM ${BASE_IMAGE} AS apollo-builder
+# Build tools stay in this stage; the final image receives only the artifacts
+# built with them.
+FROM ${BASE_IMAGE} AS build-tools
+
+RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
+    pacman -S --noconfirm --needed --disable-download-timeout \
+        base-devel \
+        ffnvcodec-headers \
+        sudo
+
+FROM build-tools AS apollo-builder
 
 ARG APOLLO_PKG=apollo-git
 ARG APOLLO_COMMIT=adc5c5a0bd80831ce495434bb16aee2cd4175fb8
@@ -55,7 +70,7 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
        fi \
     && makepkg -s --noconfirm
 
-FROM ${BASE_IMAGE} AS native-builder
+FROM build-tools AS native-builder
 
 COPY native /src
 RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
@@ -97,7 +112,7 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
 
 # wbg draws the wallpaper without gdk-pixbuf, so no image loader is spawned
 # through glycin and no bubblewrap sandbox is required at runtime.
-FROM ${BASE_IMAGE} AS wbg-builder
+FROM build-tools AS wbg-builder
 
 ARG WBG_VERSION=1.3.0
 ARG WBG_SHA256=5e23555c599e58f8fc76f2f8a697149c9fe96702a337a3e0457d503becb307a5
@@ -120,7 +135,7 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
     && ninja -C /tmp/wbg-build \
     && install -Dm0755 /tmp/wbg-build/wbg /out/wbg
 
-FROM ${BASE_IMAGE} AS rust-builder
+FROM build-tools AS rust-builder
 
 RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
     pacman -S --noconfirm --needed --disable-download-timeout rust
@@ -156,7 +171,7 @@ RUN if [ "$XINPUT_RUNTIME_TEST" != "1" ]; then \
         done; \
     fi
 
-FROM ${BASE_IMAGE} AS vkcapture-builder
+FROM build-tools AS vkcapture-builder
 
 # Build only the capture sender. The OBS plugin belongs to the host OBS
 # process; pulling obs-studio into the game image would be unnecessary.

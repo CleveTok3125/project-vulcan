@@ -98,7 +98,7 @@ services:
       OBS_VKCAPTURE: "${OBS_VKCAPTURE:-1}"
       OBS_VKCAPTURE_NAME: "${OBS_VKCAPTURE_NAME:-}"
 
-      # NVIDIA device nodes are supplied by compose.nvidia.yaml.
+      # NVIDIA device nodes come from compose.nvidia.yaml (CDI).
       NVIDIA_VISIBLE_DEVICES: "${NVIDIA_VISIBLE_DEVICES:-0}"
       NVIDIA_DRIVER_CAPABILITIES: "all"
 

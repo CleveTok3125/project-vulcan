@@ -21,10 +21,9 @@ Docker (rootful)
    └─ vulcan-inputd (socket -> gamescope EIS)
 ```
 
-The container receives the render node named by `RENDER_NODE`. On NVIDIA it
-also receives the primary card node configured in `compose.nvidia.yaml`, which
-only the encoder opens, plus the NVIDIA device nodes; the other cards are not
-passed.
+The container receives the render node named by `RENDER_NODE`. On NVIDIA,
+`compose.nvidia.yaml` adds the CDI device `nvidia.com/gpu=0`, which provides
+the driver libraries and device nodes; the other cards are not passed.
 
 Sway is the capture surface: gamescope does not expose
 `zwlr_screencopy_manager_v1`, and Apollo on Linux does not currently provide a
@@ -77,8 +76,8 @@ which is not available in this container.
 ## Host prerequisites
 
 - Linux host with Docker Engine, rootful mode.
-- NVIDIA driver, or AMD/Intel Mesa drivers; the image ships the NVIDIA
-  userland libraries, so no NVIDIA Container Toolkit is needed.
+- NVIDIA driver and NVIDIA Container Toolkit (`nvidia-container-toolkit`), or
+  AMD/Intel Mesa drivers.
 - A host user with access to the Docker daemon.
 - Game files available under host directories that can be mounted read-only.
 - `jq` and `yq` (`go-yq`) on the host to validate and convert the game
@@ -113,8 +112,8 @@ packages once. Do not use `--no-cache` for normal rebuilds.
 ### Shared base image
 
 `make base` builds `vulcan/base:<hash>` from `docker/base.Dockerfile`: the
-mirror setup, the runtime packages, the build tooling, and the game user. The
-game image starts from it and adds only the vendor packages, Apollo, the native
+mirror setup, the runtime packages, and the game user. The game image starts
+from it and adds only the vendor packages when applicable, Apollo, the native
 and Rust artifacts, the obs-vkcapture sender, and the configuration.
 
 The base tag hashes `docker/base.Dockerfile`, `docker/fetch-heavy`, and
@@ -359,7 +358,7 @@ leaves the image while another preset still uses it;
 ## Fresh deployment
 
 These steps start from a checkout with no image, volume, or local preset.
-The `make` targets add `compose.nvidia.yaml` only when `GPU_VENDOR=nvidia`;
+The `make` targets add `compose.nvidia.yaml` when `GPU_VENDOR=nvidia`;
 AMD/Intel presets use the same targets without it.
 
 1. Read the render node group:
@@ -442,14 +441,27 @@ To add or remove games, edit `games.yaml` and restart the session; see
 
 ### NVIDIA devices
 
-The image includes NVIDIA userland libraries, so the compose override passes
-the host driver nodes directly. Keep the override in sync with the host node
-names and rebuild the image after a major driver update.
+NVIDIA uses the host NVIDIA Container Toolkit and CDI:
 
-NVENC needs the primary DRM node of the NVIDIA GPU. The CUDA path maps the
-device PCI bus ID to the first `card*` entry in sysfs and opens it for the
-GBM/EGL interop, so the override passes that node (for example
-`/dev/dri/card0`) next to `RENDER_NODE`. AMD and Intel do not need it; see
+- host: NVIDIA driver and `nvidia-container-toolkit`;
+- image: no `nvidia-utils`; the toolkit injects the driver libraries, ICDs, and
+  device nodes at container start;
+- compose: `compose.nvidia.yaml` passes `nvidia.com/gpu=0`.
+
+The toolkit generates `/var/run/cdi/nvidia.yaml`; the packaged
+`nvidia-cdi-refresh` service refreshes it after a driver change. Image rebuilds
+are not required for a driver update.
+
+On a hybrid NVIDIA/AMD host, `docker run --gpus all` fails because Docker also
+looks for an AMD CDI spec. Use the explicit CDI device:
+
+```yaml
+devices:
+  - nvidia.com/gpu=0
+```
+
+NVENC needs the primary DRM node of the NVIDIA GPU. The toolkit CDI spec
+includes it. AMD and Intel do not need it; see
 [AMD and Intel](#amd-and-intel).
 
 ```bash
@@ -462,13 +474,14 @@ docker compose --env-file .env.local \
 
 ```bash
 docker compose --env-file .env.local exec game ls -l /dev/dri
-docker compose --env-file .env.local exec game ls -l /dev/nvidia*
+docker compose --env-file .env.local exec game nvidia-smi
+docker compose --env-file .env.local exec game vulkaninfo --summary
 ```
 
-Expected: the primary card node, the render node, and the NVIDIA control and
-device nodes. Apollo logs `Found DRM primary node` and `Found CUDA device`;
-without the primary node NVENC fails and the session falls back to software
-encoding.
+Expected: `vulkaninfo` reports the NVIDIA proprietary driver, `nvidia-smi`
+lists the GPU, and `ffmpeg -encoders` includes `nvenc`. Apollo logs
+`Found DRM primary node` and `Found CUDA device`; without the primary node
+NVENC fails and the session falls back to software encoding.
 
 ### AMD and Intel
 
@@ -662,11 +675,11 @@ selected env file:
 ### GPU path
 
 The container receives the render node named by `RENDER_NODE`. On NVIDIA,
-`compose.nvidia.yaml` also passes the primary card node and the NVIDIA device
-nodes; AMD/Intel need only the render node. A host iGPU is not passed through.
-`NVIDIA_VISIBLE_DEVICES` selects the NVIDIA driver index. `RENDER_NODE` must be
-the render node of the GPU that runs gamescope and the encoder; see
-[Fresh deployment](#fresh-deployment).
+`compose.nvidia.yaml` adds the CDI device `nvidia.com/gpu=0`, which includes
+the primary card node and the driver libraries. AMD/Intel need only the render
+node. A host iGPU is not passed through. CDI selects the NVIDIA device;
+`RENDER_NODE` must be the render node of the GPU that runs gamescope and the
+encoder; see [Fresh deployment](#fresh-deployment).
 
 Every streamed frame goes through two composition steps:
 
@@ -937,8 +950,8 @@ Additional hardening:
   `CHOWN` only applies to the overlay mount created by the entrypoint
 - after startup the entrypoint continues as the game user
 - keep `no-new-privileges:true`
-- pass only the DRM nodes the encoder needs: on NVIDIA the primary card node
-  plus `RENDER_NODE`; on AMD/Intel only the render node
+- pass only the GPU device the encoder needs: `nvidia.com/gpu=0` on NVIDIA,
+  or only the render node on AMD/Intel
 - do not mount the host Wayland/X11 sockets
 - keep `/dev/uinput` out of the container
 
@@ -1003,7 +1016,7 @@ make audio-status P=.env.multi
 Expected:
 
 - `HEADLESS-1` at 1920x1080@144
-- `RENDER_NODE` and, on NVIDIA, the primary card node
+- `RENDER_NODE` and, on NVIDIA, the CDI device `nvidia.com/gpu=0`
 - `nvenc` or `vaapi` appears in the encoder list
 - when OBS audio is enabled, `audio-status` shows a live module and source
 - when host audio is active, OBS lists `vulcan-multi-audio`

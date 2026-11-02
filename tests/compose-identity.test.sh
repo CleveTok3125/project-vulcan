@@ -83,6 +83,7 @@ second="$(render "$workdir/second.env")"
 
 check_project first demo-one 47989 demo-two "$first"
 check_project second demo-two 47999 demo-one "$second"
+check_contains 'nvidia override uses CDI' 'nvidia.com/gpu=0' "$first"
 
 data_dir="$workdir/data"
 mkdir -p "$data_dir"

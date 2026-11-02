@@ -1,14 +1,7 @@
 services:
   game:
-    # The image ships NVIDIA userland libraries, so passing the host device
-    # nodes is enough. Keep this list in sync with the host driver version;
-    # rebuild the image after a major driver update.
+    # The host NVIDIA Container Toolkit injects the driver libraries and the
+    # device nodes through CDI. Use an explicit device: --gpus all also asks
+    # for the AMD CDI spec on hybrid hosts and fails when that spec is absent.
     devices:
-      # NVENC opens the primary DRM node of the GPU for the CUDA/EGL interop.
-      - /dev/dri/card0
-      - /dev/nvidiactl
-      - /dev/nvidia0
-      - /dev/nvidia-modeset
-      - /dev/nvidia-uvm
-      - /dev/nvidia-uvm-tools
-      - /dev/nvidia-caps
+      - nvidia.com/gpu=0

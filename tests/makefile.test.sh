@@ -75,7 +75,7 @@ check_contains 'explicit preset volume' 'vulcan_demo-data' "$(run_make clean-ove
 check_contains 'explicit preset compose down' '--env-file preset.env' "$(run_make down P=preset.env)"
 
 out="$(run_make up P=nvidia.env)"
-check_contains 'nvidia preset adds the device override' 'compose.nvidia.yaml' "$out"
+check_contains 'nvidia preset uses the CDI override' 'compose.nvidia.yaml' "$out"
 out="$(run_make up P=amd.env)"
 check_missing 'amd preset skips the nvidia override' 'compose.nvidia.yaml' "$out"
 

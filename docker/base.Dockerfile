@@ -6,7 +6,7 @@
 # image on top of this one.
 #
 # Pin the base image digest before publishing a reproducible build.
-FROM cachyos/cachyos-v3@sha256:91d3b3f4db6016ca308765122d4c02049c39068ae37c509365047fa2c02d9af5
+FROM cachyos/cachyos-v3@sha256:91d3b3f4db6016ca308765122d4c02049c39068ae37c509365047fa2c02d9af5 AS runtime
 
 # The image ships a fixed mirror list; rate the reachable mirrors once per
 # build so package downloads do not stall on a slow or blocked server.
@@ -33,11 +33,12 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
 # rated mirror instead of the image's original one. The list also carries the
 # Apollo runtime dependencies, so installing the built package needs no
 # download.
+#
+# boost-libs is an apollo-git runtime dependency. Keep it explicit so removing
+# the build tools does not drop it.
 RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
     pacman -Syyu --noconfirm --needed --disable-download-timeout \
-        base-devel \
         git \
-        sudo \
         dbus \
         gettext \
         jq \
@@ -55,6 +56,7 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
         libx11 \
         libxtst \
         ffmpeg \
+        boost-libs \
         gamescope \
         libei \
         wine-mono \
@@ -65,7 +67,6 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
         pipewire-pulse \
         wireplumber \
         libinput \
-        ffnvcodec-headers \
         adwaita-fonts \
         adwaita-icon-theme \
         adwaita-icon-theme-legacy \
@@ -114,3 +115,16 @@ RUN groupadd -f seat \
     && useradd -m -u 1000 -g game \
         -G seat,video,render,input \
         -s /bin/bash game
+
+# The CachyOS parent already ships base-devel. Removing it in a later layer
+# would leave the deleted files in the parent layer, so flatten the cleaned
+# runtime into a single layer. boost-libs is reinstalled because it is an
+# apollo-git runtime dependency and pacman -Rns removes it with gdb.
+RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
+    pacman -Rns --noconfirm base-devel \
+    && pacman -S --noconfirm --needed --disable-download-timeout boost-libs
+
+FROM scratch
+COPY --from=runtime / /
+ENV LANG=C.UTF-8
+CMD ["/usr/bin/bash"]

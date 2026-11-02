@@ -65,7 +65,8 @@ IMAGE_TAG := local-$(shell printf '%s' '$(BASE_TAG)|$(GPU_VENDOR)|$(APOLLO_PKG)|
 IMAGE := vulcan/game-stream:$(IMAGE_TAG)
 export IMAGE_TAG
 
-# The NVIDIA override exposes host driver nodes that do not exist on AMD/Intel.
+# The NVIDIA override exposes the host CDI device. AMD/Intel use the render
+# node from the base compose file only.
 COMPOSE_NVIDIA := $(if $(filter nvidia,$(GPU_VENDOR)),-f compose.nvidia.yaml,)
 COMPOSE_DATA := $(if $(strip $(VULCAN_DATA_DIR)),-f compose.data.yaml,)
 COMPOSE = AUDIO_RUNTIME_DIR="$(AUDIO_RUNTIME_DIR)" docker compose --env-file $(P_SINGLE) -f compose.yaml $(COMPOSE_NVIDIA) $(COMPOSE_DATA) -f $(GAMES_COMPOSE)
