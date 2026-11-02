@@ -43,6 +43,7 @@ printf 'SESSION_ID=alpha\nGAMES_CATALOG=games.yaml\n' >"$workdir/.env.local"
 printf 'SESSION_ID=demo\nGAMES_CATALOG=games.yaml\n' >"$workdir/preset.env"
 printf 'SESSION_ID=demo\nGAMES_CATALOG=games.yaml\nGPU_VENDOR=nvidia\n' >"$workdir/nvidia.env"
 printf 'SESSION_ID=demo\nGAMES_CATALOG=games.yaml\nGPU_VENDOR=amd\n' >"$workdir/amd.env"
+printf 'SESSION_ID=demo\nGAMES_CATALOG=games.yaml\nGPU_VENDOR=intel\n' >"$workdir/intel.env"
 mkdir -p "$workdir/data"
 printf 'SESSION_ID=data-check\nGAMES_CATALOG=games.yaml\nVULCAN_DATA_DIR=%s\n' \
     "$workdir/data" >"$workdir/data.env"
@@ -78,6 +79,8 @@ out="$(run_make up P=nvidia.env)"
 check_contains 'nvidia preset uses the CDI override' 'compose.nvidia.yaml' "$out"
 out="$(run_make up P=amd.env)"
 check_missing 'amd preset skips the nvidia override' 'compose.nvidia.yaml' "$out"
+out="$(run_make up P=intel.env)"
+check_missing 'intel preset skips the nvidia override' 'compose.nvidia.yaml' "$out"
 
 # A host data directory adds the storage override and changes teardown.
 out="$(run_make up P=data.env)"
@@ -334,6 +337,7 @@ default_tag="$(tag_for "$(run_make uninstall CONFIRM=1)")"
 explicit_tag="$(tag_for "$(run_make uninstall CONFIRM=1 P=nvidia.env)")"
 other_game_tag="$(tag_for "$(run_make uninstall CONFIRM=1 P=preset.env)")"
 variant_tag="$(tag_for "$(run_make uninstall CONFIRM=1 P=amd.env)")"
+intel_tag="$(tag_for "$(run_make uninstall CONFIRM=1 P=intel.env)")"
 
 if [ -n "$default_tag" ] && [ "$default_tag" = "$explicit_tag" ]; then
     printf 'ok   explicit defaults keep the image tag\n'
@@ -351,6 +355,12 @@ if [ "$default_tag" != "$variant_tag" ]; then
     printf 'ok   a different backend gets its own tag\n'
 else
     printf 'FAIL a different backend gets its own tag: both are [%s]\n' "$default_tag" >&2
+    failures=$((failures + 1))
+fi
+if [ -n "$intel_tag" ] && [ "$intel_tag" != "$variant_tag" ]; then
+    printf 'ok   intel gets its own tag\n'
+else
+    printf 'FAIL intel gets its own tag: [%s] vs [%s]\n' "$intel_tag" "$variant_tag" >&2
     failures=$((failures + 1))
 fi
 ref_tag="$(tag_for "$(run_make uninstall CONFIRM=1 OBS_VKCAPTURE_REF=1.5.7)")"

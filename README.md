@@ -489,14 +489,29 @@ VAAPI opens the render node in `APOLLO_ADAPTER`, or `/dev/dri/renderD128` when
 it is empty. It never opens a primary card node. Set `APOLLO_ADAPTER` when the
 render node is not `renderD128`.
 
+AMD:
+
 ```dotenv
 GPU_VENDOR=amd
 APOLLO_ENCODER=vaapi
 APOLLO_ADAPTER=/dev/dri/renderD128
 ```
 
-`make stats` reads `nvidia-smi`; on AMD/Intel, use `docker stats` for CPU and
-memory.
+Intel:
+
+```dotenv
+GPU_VENDOR=intel
+APOLLO_ENCODER=vaapi
+APOLLO_ADAPTER=/dev/dri/renderD128
+```
+
+The Intel image installs `vulkan-intel` for Vulkan and `intel-media-driver`
+for VAAPI. `intel-media-driver` covers Broadwell and newer; older Intel GPUs
+may need `libva-intel-driver` instead.
+
+Neither path uses the NVIDIA toolkit or `compose.nvidia.yaml`; only the render
+node is passed. `make stats` reads `nvidia-smi`; on AMD/Intel, use
+`docker stats` for CPU and memory.
 
 ## Display and game
 

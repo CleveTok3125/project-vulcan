@@ -17,6 +17,9 @@ ARG GPU_VENDOR=nvidia
 RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
     if [ "$GPU_VENDOR" = "nvidia" ]; then \
         printf '%s\n' 'NVIDIA runtime libraries come from the host toolkit'; \
+    elif [ "$GPU_VENDOR" = "intel" ]; then \
+        pacman -S --noconfirm --needed --disable-download-timeout \
+            vulkan-intel intel-media-driver; \
     else \
         pacman -S --noconfirm --needed --disable-download-timeout vulkan-radeon libva-mesa-driver; \
     fi
