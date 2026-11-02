@@ -107,7 +107,7 @@ endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help base base-rebuild rm-base images volume volumes _volume-name build up rebuild _recreate stop down restart logs ps up-all down-all stop-all restart-all ps-all build-all stats-all uninstall-all check-ports check-xinput ports _check-presets _check-ports _games-config _audio-runtime _data-runtime audio-up audio-down audio-status config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
+.PHONY: help base base-rebuild rm-base images volume volumes _volume-name build up rebuild _recreate stop down restart logs ps up-all down-all stop-all restart-all ps-all build-all stats-all uninstall-all check-ports check-xinput check-rust ports _check-presets _check-ports _games-config _audio-runtime _data-runtime audio-up audio-down audio-status config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
 
 # The table keeps the file order of the targets inside each section. A `# ---`
 # line between blocks starts a new group, which the table separates with a blank
@@ -181,7 +181,7 @@ volumes: ## [global] List the Vulcan volumes
 	done
 
 # ---
-build: _check-presets _games-config _audio-runtime base ## [presets] Build the container image
+build: _check-presets _games-config _audio-runtime check-rust base ## [presets] Build the container image
 ifeq ($(P_COUNT),1)
 	$(COMPOSE) build
 else
@@ -377,6 +377,9 @@ check-xinput: base ## [global] Run the XInput proxy tests in a build stage
 		--build-arg XINPUT_RUNTIME_TEST=1 \
 		--target xinput-test \
 		--output type=cacheonly .
+
+check-rust: ## [global] Run clippy on the Rust workspace
+	cd rust && cargo clippy --workspace --all-targets --locked -- -D warnings
 
 ports: _check-presets ## [presets] Show the Apollo ports for every listed preset
 	@scripts/show-ports.sh $(P_LIST)

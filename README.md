@@ -77,6 +77,8 @@ which is not available in this container.
 - Game files available under host directories that can be mounted read-only.
 - `jq` and `yq` (`go-yq`) on the host to validate and convert the game
   catalog: `sudo pacman -S jq go-yq`.
+- Rust toolchain with `cargo` and `clippy` for `make check-rust`; `make build`
+  runs that check before building the image.
 - Optional OBS capture: native OBS on Wayland plus `obs-vkcapture` matching
   `OBS_VKCAPTURE_REF`. The container does not ship OBS or the OBS plugin.
 - Optional OBS audio: PipeWire or PulseAudio on the host with `pactl` and
@@ -945,7 +947,14 @@ Additional hardening:
 
 ## Validation checklist
 
-Enter the running session with `make shell P=.env.multi`, then run:
+Before building, or after changing Rust code, run on the host:
+
+```bash
+make check-rust
+```
+
+`make build` runs the same check before it builds the image. Enter the running
+session with `make shell P=.env.multi`, then run:
 
 ```bash
 ls -l /dev/dri
