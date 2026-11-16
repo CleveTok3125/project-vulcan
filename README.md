@@ -67,6 +67,7 @@ which is not available in this container.
 - [Maintenance](#maintenance)
   - [Session cleanup](#session-cleanup)
   - [Updating game files](#updating-game-files)
+    - [Stale overlay after a host update](#stale-overlay-after-a-host-update)
   - [Recreating a Wine prefix](#recreating-a-wine-prefix)
   - [Migrating from per-game presets](#migrating-from-per-game-presets)
 - [Security](#security)
@@ -894,6 +895,21 @@ streaming container, or start a separate maintenance container with a
 read-write mount. Do not expose a read-write game directory while streaming.
 Run `make clean-overlay` afterwards so the container stops using the copies it
 wrote into its overlay and reads the updated tree.
+
+#### Stale overlay after a host update
+
+An overlay upper layer can outlive the host tree it was built from. The upper
+copy then hides the updated file in the lower layer, and the game keeps reading
+stale assets even though the host files are current.
+
+The game may report a failed resource download or a generic network error and
+retry in a loop. When the host files are current and the network works, clear
+the upper layers with `make clean-overlay`, which covers every game in the
+session, and start the game again. For games that record a `res_revision` file,
+a different value in the lower and upper layer confirms the mismatch.
+
+`clean-overlay` also removes the reset markers, so the catalog `reset_paths`
+runs again on the next launch.
 
 ### Recreating a Wine prefix
 
