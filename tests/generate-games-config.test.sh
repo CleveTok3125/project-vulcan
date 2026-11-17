@@ -48,11 +48,14 @@ PY
 EOF
 chmod 0755 "$workdir/yq"
 
-mkdir -p "$workdir/games/Game A" "$workdir/games/Game B" "$workdir/wine/beta"
+mkdir -p "$workdir/games/Game A" "$workdir/games/Game B" "$workdir/games/Game C" \
+    "$workdir/wine/beta" "$workdir/eden-content"
 : >"$workdir/games/Game A/Alpha.exe"
 : >"$workdir/games/Game B/Beta.exe"
+: >"$workdir/games/Game C/game.xci"
 
 cat >"$workdir/games.yaml" <<EOF
+eden_content: $workdir/eden-content
 games:
   - id: alpha
     name: Alpha Game
@@ -65,15 +68,22 @@ games:
     wine_source: $workdir/wine/beta
     reset_paths:
       - Data/Login
+  - id: gamma
+    name: Gamma Game
+    runner: eden
+    source: $workdir/games/Game C
+    rom: game.xci
 EOF
 
 YQ="$workdir/yq" "$script" "$workdir/games.yaml" "$workdir/out"
 
-check 'game count' '2' "$(jq '.games | length' "$workdir/out/games.json")"
+check 'game count' '3' "$(jq '.games | length' "$workdir/out/games.json")"
 check 'source kept' "$workdir/games/Game A" \
     "$(jq -r '.games[0].source' "$workdir/out/games.json")"
 check 'reset path kept' 'Data/Login' \
     "$(jq -r '.games[1].reset_paths[0]' "$workdir/out/games.json")"
+check 'eden rom kept' 'game.xci' \
+    "$(jq -r '.games[2].rom' "$workdir/out/games.json")"
 
 compose="$(cat "$workdir/out/compose.games.yaml")"
 check_contains 'compose has service' 'services:' "$compose"
@@ -81,11 +91,15 @@ check_contains 'compose mounts the first game' \
     "\"$workdir/games/Game A:/games-ro/alpha:ro\"" "$compose"
 check_contains 'compose mounts the second game' \
     "\"$workdir/games/Game B:/games-ro/beta:ro\"" "$compose"
+check_contains 'compose mounts the emulator game' \
+    "\"$workdir/games/Game C:/games-ro/gamma:ro\"" "$compose"
 check_contains 'compose mounts the game wine tree' \
     "\"$workdir/wine/beta:/wine/beta:ro\"" "$compose"
+check_contains 'compose mounts the eden content' \
+    "\"$workdir/eden-content:/eden-content:ro\"" "$compose"
 
 # The generated override is valid YAML and carries the expected mounts.
-if python3 - "$workdir/out/compose.games.yaml" "$workdir/games/Game A" "$workdir/games/Game B" "$workdir/wine/beta" <<'PY'
+if python3 - "$workdir/out/compose.games.yaml" "$workdir/games/Game A" "$workdir/games/Game B" "$workdir/games/Game C" "$workdir/wine/beta" "$workdir/eden-content" <<'PY'
 import sys
 import yaml
 
@@ -94,7 +108,9 @@ with open(sys.argv[1], encoding="utf-8") as handle:
 assert data["services"]["game"]["volumes"] == [
     f"{sys.argv[2]}:/games-ro/alpha:ro",
     f"{sys.argv[3]}:/games-ro/beta:ro",
-    f"{sys.argv[4]}:/wine/beta:ro",
+    f"{sys.argv[4]}:/games-ro/gamma:ro",
+    f"{sys.argv[5]}:/wine/beta:ro",
+    f"{sys.argv[6]}:/eden-content:ro",
 ]
 PY
 then
@@ -113,6 +129,32 @@ elif grep -Fq 'game executable not found' <<<"$output"; then
     printf 'ok   missing game executable is rejected\n'
 else
     printf 'FAIL missing game executable: missing message in [%s]\n' "$output" >&2
+    failures=$((failures + 1))
+fi
+
+# Missing emulator roms are rejected as well.
+: >"$workdir/games/Game B/Beta.exe"
+rm "$workdir/games/Game C/game.xci"
+if output="$(YQ="$workdir/yq" "$script" "$workdir/games.yaml" "$workdir/missing-rom" 2>&1)"; then
+    printf 'FAIL missing game rom is rejected\n' >&2
+    failures=$((failures + 1))
+elif grep -Fq 'game rom not found' <<<"$output"; then
+    printf 'ok   missing game rom is rejected\n'
+else
+    printf 'FAIL missing game rom: missing message in [%s]\n' "$output" >&2
+    failures=$((failures + 1))
+fi
+
+# A missing content directory is rejected before Compose sees the catalog.
+: >"$workdir/games/Game C/game.xci"
+rm -rf "$workdir/eden-content"
+if output="$(YQ="$workdir/yq" "$script" "$workdir/games.yaml" "$workdir/missing-content" 2>&1)"; then
+    printf 'FAIL missing eden content is rejected\n' >&2
+    failures=$((failures + 1))
+elif grep -Fq 'eden_content directory not found' <<<"$output"; then
+    printf 'ok   missing eden content is rejected\n'
+else
+    printf 'FAIL missing eden content: missing message in [%s]\n' "$output" >&2
     failures=$((failures + 1))
 fi
 

@@ -103,7 +103,9 @@ if [ "${ENABLE_OVERLAY:-1}" = "1" ]; then
         fi
         install -d -m 0755 "$game_path"
         as_game install -d -m 0755 "$overlay_dir" "$overlay_dir/upper" "$overlay_dir/work"
-        as_game install -d -m 0755 "/data/prefix/${game_id}"
+        if [ "$(game_runner "$GAMES_CATALOG_PATH" "$game_id")" = "wine" ]; then
+            as_game install -d -m 0755 "/data/prefix/${game_id}"
+        fi
         if ! mountpoint -q "$game_path"; then
             mount -t overlay overlay \
                 -o "lowerdir=${game_ro},upperdir=${overlay_dir}/upper,workdir=${overlay_dir}/work" \

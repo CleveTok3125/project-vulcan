@@ -5,11 +5,16 @@
 #
 # id:           path segment, unique within the session
 # name:         label shown in Apollo/Artemis
+# runner:       launcher kind, "wine" (default) or "eden"
 # source:       absolute host directory mounted read-only at /games-ro/<id>
-# exe:          executable path relative to source and /games/<id>
+# exe:          executable path relative to source and /games/<id>; wine only
+# rom:          game image path relative to source; eden only
 # reset_paths:  paths relative to source, cleared once per Wine prefix
 # wine_source:  optional absolute Wine tree mounted at /wine/<id>
 # uuid:         optional stable app UUID; empty derives one from id
+#
+# eden_content: optional absolute host directory mounted read-only at
+#               /eden-content as a source for updates and DLC
 games:
   - id: demo
     name: Demo Game
@@ -24,3 +29,13 @@ games:
     reset_paths:
       - Data/Login
       - Data/Cache
+
+# A native emulator entry runs the image from the read-only mount. Any
+# session with such an entry also gets an Eden Setup app, which opens the
+# emulator without a game to install keys, firmware, and updates:
+#
+#   - id: mario
+#     name: Super Mario 3D World
+#     runner: eden
+#     source: /srv/games/mario
+#     rom: game.xci

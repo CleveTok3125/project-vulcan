@@ -131,6 +131,68 @@ expect_invalid 'empty name' "$workdir/empty-name.json" 'name must not be empty'
 jq '.games[0].reset_paths = "one:two"' "$catalog" >"$workdir/string-reset.json"
 expect_invalid 'reset paths must be an array' "$workdir/string-reset.json" 'reset_paths must be an array'
 
+# A catalog can add a native emulator entry beside the Wine games.
+eden_catalog="$workdir/eden.json"
+cat >"$eden_catalog" <<'EOF'
+{
+  "eden_content": "/srv/eden/content",
+  "games": [
+    {
+      "id": "alpha",
+      "name": "Alpha Game",
+      "source": "/srv/games/alpha",
+      "exe": "Alpha.exe"
+    },
+    {
+      "id": "gamma",
+      "name": "Gamma Game",
+      "runner": "eden",
+      "source": "/srv/games/gamma",
+      "rom": "game.xci"
+    }
+  ]
+}
+EOF
+expect_valid 'eden entry' "$eden_catalog"
+check 'eden runner is reported' 'eden' "$(game_runner "$eden_catalog" gamma)"
+check 'wine runner is the default' 'wine' "$(game_runner "$eden_catalog" alpha)"
+check 'eden content is reported' '/srv/eden/content' \
+    "$(catalog_eden_content "$eden_catalog")"
+check 'eden runner is detected' 'yes' \
+    "$(catalog_has_eden_runner "$eden_catalog" && printf yes || printf no)"
+
+eden_specs="$(build_app_specs "$eden_catalog")"
+check 'eden app spec count' '3' "$(jq 'length' <<<"$eden_specs")"
+check 'eden setup app name' 'Eden Setup' "$(jq -r '.[2].name' <<<"$eden_specs")"
+check 'eden setup app command' '/usr/local/bin/eden-setup.sh' \
+    "$(jq -r '.[2].cmd' <<<"$eden_specs")"
+check 'eden setup app uuid is derived' "$(derive_app_uuid eden-setup)" \
+    "$(jq -r '.[2].uuid' <<<"$eden_specs")"
+
+# The setup app stays available without a content directory: it is also where
+# the controller mapping is created.
+jq 'del(.eden_content)' "$eden_catalog" >"$workdir/eden-no-content.json"
+check 'setup app without content' '3' \
+    "$(build_app_specs "$workdir/eden-no-content.json" | jq 'length')"
+
+# Runner-specific fields are rejected instead of being silently ignored.
+jq '.games[1] |= del(.rom)' "$eden_catalog" >"$workdir/eden-no-rom.json"
+expect_invalid 'eden without rom' "$workdir/eden-no-rom.json" 'rom must be relative'
+jq '.games[1].exe = "game.exe"' "$eden_catalog" >"$workdir/eden-with-exe.json"
+expect_invalid 'eden with exe' "$workdir/eden-with-exe.json" 'must not set exe'
+jq '.games[1].wine_source = "/srv/wine"' "$eden_catalog" >"$workdir/eden-with-wine.json"
+expect_invalid 'eden with wine source' "$workdir/eden-with-wine.json" 'must not set wine_source'
+jq '.games[1].reset_paths = ["Data"]' "$eden_catalog" >"$workdir/eden-with-reset.json"
+expect_invalid 'eden with reset paths' "$workdir/eden-with-reset.json" 'must not set reset_paths'
+jq '.games[0].rom = "game.xci"' "$eden_catalog" >"$workdir/wine-with-rom.json"
+expect_invalid 'wine with rom' "$workdir/wine-with-rom.json" 'must not set rom'
+jq '.games[1].runner = "retroarch"' "$eden_catalog" >"$workdir/bad-runner.json"
+expect_invalid 'unsupported runner' "$workdir/bad-runner.json" 'unsupported runner'
+jq '.games[1].rom = "../outside.xci"' "$eden_catalog" >"$workdir/eden-traversal.json"
+expect_invalid 'eden rom traversal' "$workdir/eden-traversal.json" 'rom must be relative'
+jq '.eden_content = "relative/content"' "$eden_catalog" >"$workdir/relative-content.json"
+expect_invalid 'relative eden content' "$workdir/relative-content.json" 'eden_content must be absolute'
+
 if [ "$failures" -ne 0 ]; then
     printf '%s check(s) failed\n' "$failures" >&2
     exit 1

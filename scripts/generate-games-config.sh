@@ -35,16 +35,25 @@ validate_games_catalog "$json_tmp" || exit 1
 
 while IFS= read -r id; do
     source="$(game_field "$json_tmp" "$id" source)"
-    exe="$(game_field "$json_tmp" "$id" exe)"
+    runner="$(game_runner "$json_tmp" "$id")"
     wine_source="$(game_field "$json_tmp" "$id" wine_source)"
     source="${source%/}"
     if [ ! -d "$source" ]; then
         printf '[vulcan] %s: game directory not found: %s\n' "$id" "$source" >&2
         exit 1
     fi
-    if [ ! -f "$source/$exe" ]; then
-        printf '[vulcan] %s: game executable not found: %s/%s\n' "$id" "$source" "$exe" >&2
-        exit 1
+    if [ "$runner" = "eden" ]; then
+        rom="$(game_field "$json_tmp" "$id" rom)"
+        if [ ! -e "$source/$rom" ]; then
+            printf '[vulcan] %s: game rom not found: %s/%s\n' "$id" "$source" "$rom" >&2
+            exit 1
+        fi
+    else
+        exe="$(game_field "$json_tmp" "$id" exe)"
+        if [ ! -f "$source/$exe" ]; then
+            printf '[vulcan] %s: game executable not found: %s/%s\n' "$id" "$source" "$exe" >&2
+            exit 1
+        fi
     fi
     if [ -n "$wine_source" ]; then
         wine_source="${wine_source%/}"
@@ -55,6 +64,15 @@ while IFS= read -r id; do
     fi
 done < <(game_ids "$json_tmp")
 
+eden_content="$(catalog_eden_content "$json_tmp")"
+if [ -n "$eden_content" ]; then
+    eden_content="${eden_content%/}"
+    if [ ! -d "$eden_content" ]; then
+        printf '[vulcan] eden_content directory not found: %s\n' "$eden_content" >&2
+        exit 1
+    fi
+fi
+
 {
     printf 'services:\n'
     printf '  game:\n'
@@ -62,6 +80,9 @@ done < <(game_ids "$json_tmp")
     jq -r '.games[] | ("\(.source):/games-ro/\(.id):ro") | "      - \(@json)"' "$json_tmp"
     jq -r '.games[] | select(.wine_source != null and .wine_source != "")
         | ("\(.wine_source):/wine/\(.id):ro") | "      - \(@json)"' "$json_tmp"
+    if [ -n "$eden_content" ]; then
+        jq -rn --arg mount "${eden_content}:/eden-content:ro" '"      - \($mount|@json)"'
+    fi
 } >"$compose_tmp"
 
 mv "$json_tmp" "$outdir/games.json"

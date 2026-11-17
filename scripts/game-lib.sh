@@ -46,6 +46,32 @@ game_reset_paths() {
         '.games[] | select(.id == $id) | .reset_paths[]? // empty' "$catalog"
 }
 
+# game_runner prints the launcher kind for a game id.
+#
+# An entry without a runner is a Wine game, which keeps catalogs written before
+# the native runner existed valid.
+game_runner() {
+    local catalog="$1" id="$2" runner
+    runner="$(game_field "$catalog" "$id" runner)"
+    printf '%s\n' "${runner:-wine}"
+}
+
+# catalog_eden_content prints the shared update/DLC directory, empty when unset.
+catalog_eden_content() {
+    jq -r '.eden_content // ""' "$1"
+}
+
+# catalog_has_eden_runner reports whether any entry uses the Eden runner.
+catalog_has_eden_runner() {
+    local catalog="$1" id
+    while IFS= read -r id; do
+        if [ "$(game_runner "$catalog" "$id")" = "eden" ]; then
+            return 0
+        fi
+    done < <(game_ids "$catalog")
+    return 1
+}
+
 # build_app_specs prints the Apollo app specs as a JSON array.
 #
 # Each spec carries the catalog name, the launcher command, and a stable UUID.
@@ -65,6 +91,16 @@ build_app_specs() {
             '. + [{name: $name, cmd: $cmd, uuid: $uuid}]' <<<"$specs")"
     done < <(game_ids "$catalog")
 
+    # The setup app opens the emulator without a game so updates, DLC, and the
+    # DSU controller mapping can be prepared once per session volume.
+    if catalog_has_eden_runner "$catalog"; then
+        uuid="$(derive_app_uuid eden-setup)"
+        specs="$(jq -c --arg name 'Eden Setup' \
+            --arg cmd '/usr/local/bin/eden-setup.sh' \
+            --arg uuid "$uuid" \
+            '. + [{name: $name, cmd: $cmd, uuid: $uuid}]' <<<"$specs")"
+    fi
+
     printf '%s\n' "$specs"
 }
 
@@ -74,7 +110,7 @@ build_app_specs() {
 # before creating overlays or Apollo apps.
 validate_games_catalog() {
     local catalog="${1:-}"
-    local id name exe source reset uuid wine_source
+    local id name exe source reset uuid wine_source runner rom eden_content
     local -A seen=()
 
     if [ ! -r "$catalog" ]; then
@@ -105,11 +141,35 @@ validate_games_catalog() {
             return 1
         fi
 
-        exe="$(game_field "$catalog" "$id" exe)"
-        if ! is_safe_relative_path "$exe"; then
-            printf '[vulcan] %s: exe must be relative and stay inside the game directory\n' "$id" >&2
-            return 1
-        fi
+        runner="$(game_runner "$catalog" "$id")"
+        case "$runner" in
+            wine)
+                exe="$(game_field "$catalog" "$id" exe)"
+                if ! is_safe_relative_path "$exe"; then
+                    printf '[vulcan] %s: exe must be relative and stay inside the game directory\n' "$id" >&2
+                    return 1
+                fi
+                if [ -n "$(game_field "$catalog" "$id" rom)" ]; then
+                    printf '[vulcan] %s: wine entries must not set rom\n' "$id" >&2
+                    return 1
+                fi
+                ;;
+            eden)
+                rom="$(game_field "$catalog" "$id" rom)"
+                if ! is_safe_relative_path "$rom"; then
+                    printf '[vulcan] %s: rom must be relative and stay inside the game directory\n' "$id" >&2
+                    return 1
+                fi
+                if [ -n "$(game_field "$catalog" "$id" exe)" ]; then
+                    printf '[vulcan] %s: eden entries must not set exe\n' "$id" >&2
+                    return 1
+                fi
+                ;;
+            *)
+                printf '[vulcan] %s: unsupported runner: %s\n' "$id" "$runner" >&2
+                return 1
+                ;;
+        esac
 
         source="$(game_field "$catalog" "$id" source)"
         case "$source" in
@@ -131,12 +191,23 @@ validate_games_catalog() {
                     return 1
                     ;;
             esac
+            if [ "$runner" = "eden" ]; then
+                printf '[vulcan] %s: eden entries must not set wine_source\n' "$id" >&2
+                return 1
+            fi
         fi
 
         if ! jq -e --arg id "$id" \
             '.games[] | select(.id == $id) | ((.reset_paths // []) | type == "array")' \
             "$catalog" >/dev/null 2>&1; then
             printf '[vulcan] %s: reset_paths must be an array\n' "$id" >&2
+            return 1
+        fi
+
+        if [ "$runner" = "eden" ] \
+            && jq -e --arg id "$id" '.games[] | select(.id == $id) | (.reset_paths // []) | length > 0' \
+                "$catalog" >/dev/null 2>&1; then
+            printf '[vulcan] %s: eden entries must not set reset_paths\n' "$id" >&2
             return 1
         fi
 
@@ -154,4 +225,16 @@ validate_games_catalog() {
             return 1
         fi
     done < <(game_ids "$catalog")
+
+    eden_content="$(catalog_eden_content "$catalog")"
+    if [ -n "$eden_content" ]; then
+        case "$eden_content" in
+            /*)
+                ;;
+            *)
+                printf '[vulcan] eden_content must be absolute\n' >&2
+                return 1
+                ;;
+        esac
+    fi
 }
