@@ -18,7 +18,8 @@ Docker (rootful)
    ├─ gamescope (nested Wayland client, optional)
    │  └─ wine + selected game
    ├─ PipeWire (Apollo audio sink)
-   └─ vulcan-inputd (socket -> gamescope EIS)
+   ├─ vulcan-inputd (socket -> gamescope EIS)
+   └─ vulcan-dsud (pad state -> Cemuhook UDP)
 ```
 
 The container receives the render node named by `RENDER_NODE`. On NVIDIA,

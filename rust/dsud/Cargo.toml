@@ -1,0 +1,9 @@
+[package]
+name = "vulcan-dsud"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "vulcan-dsud"
+path = "src/main.rs"
