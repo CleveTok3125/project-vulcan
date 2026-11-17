@@ -10,6 +10,8 @@ services:
         APOLLO_PKG: "${APOLLO_PKG:-apollo-git}"
         APOLLO_COMMIT: "${APOLLO_COMMIT:-adc5c5a0bd80831ce495434bb16aee2cd4175fb8}"
         OBS_VKCAPTURE_REF: "${OBS_VKCAPTURE_REF:-v1.5.6}"
+        EDEN_VERSION: "${EDEN_VERSION:-0.2.1}"
+        EDEN_SHA256: "${EDEN_SHA256:-2fae658397daf13c118082a3eb65d61a6519967b5e22e6667756baecf6000c5a}"
     image: "vulcan/game-stream:${IMAGE_TAG:-local}"
     # Never pull: the tag is built locally for its build variant.
     pull_policy: never
@@ -77,6 +79,8 @@ services:
       SWAY_ALLOW_SOFTWARE: "${SWAY_ALLOW_SOFTWARE:-1}"
       INPUT_TRANSPORT: "${INPUT_TRANSPORT:-socket}"
       INPUT_GAMEPAD: "${INPUT_GAMEPAD:-1}"
+      VULCAN_DSUD: "${VULCAN_DSUD:-1}"
+      VULCAN_DSUD_PORT: "${VULCAN_DSUD_PORT:-26760}"
       ENABLE_OVERLAY: "${ENABLE_OVERLAY:-1}"
 
       RENDER_NODE: "${RENDER_NODE:?set RENDER_NODE in the selected env file}"

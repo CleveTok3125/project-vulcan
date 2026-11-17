@@ -120,10 +120,11 @@ and Rust artifacts, the obs-vkcapture sender, and the configuration.
 
 The base tag hashes `docker/base.Dockerfile`, `docker/fetch-heavy`, and
 `MIRROR_COUNTRY`; the game tag hashes the base tag, `GPU_VENDOR`, `APOLLO_PKG`,
-`APOLLO_COMMIT`, and `OBS_VKCAPTURE_REF`. Editing scripts or config rebuilds
-the last layers only, an Apollo bump rebuilds the Apollo stage only, and a
-package change rebuilds the base and everything above it. `uninstall` removes
-the game image once no container uses it.
+`APOLLO_COMMIT`, `OBS_VKCAPTURE_REF`, `EDEN_VERSION`, and `EDEN_SHA256`.
+Editing scripts or config rebuilds the last layers only, an Apollo bump
+rebuilds the Apollo stage only, and a package change rebuilds the base and
+everything above it. `uninstall` removes the game image once no container
+uses it.
 
 `docker/fetch-heavy` prefetches the large build packages into the pacman cache
 with aria2c. Everything else, including repository databases and parallel
@@ -146,9 +147,11 @@ The build pins its external inputs:
 - `APOLLO_PKG` and `APOLLO_COMMIT` pin the AUR package source to an exact
   Apollo commit.
 - Rust crates are pinned by `rust/Cargo.lock` and built with `--locked`.
+- The Eden AppImage is pinned by `EDEN_VERSION` and `EDEN_SHA256`.
 
 The image tag follows the build inputs: the base tag, `GPU_VENDOR`,
-`APOLLO_PKG`, `APOLLO_COMMIT`, and `OBS_VKCAPTURE_REF` are hashed into
+`APOLLO_PKG`, `APOLLO_COMMIT`, `OBS_VKCAPTURE_REF`, `EDEN_VERSION`, and
+`EDEN_SHA256` are hashed into
 `vulcan/game-stream:local-<hash>`. Presets with the same inputs share one
 image; a preset that changes them builds its own tag instead of overwriting
 the image another preset runs on. `up` never pulls, so it stops with an error
@@ -158,7 +161,7 @@ CachyOS repositories do not expose an archive snapshot, so packages are
 resolved from the CachyOS repos at build time. The pinned base digest is the
 strongest available pin for those packages.
 
-Update these together when intentionally upgrading the image.
+Update the pinned inputs together when intentionally upgrading the image.
 
 ## Configuration
 

@@ -191,6 +191,25 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
     && cmake --build /src/obs-vkcapture/build -j"$(nproc)" \
     && DESTDIR=/out cmake --install /src/obs-vkcapture/build
 
+FROM build-tools AS eden-builder
+
+# The emulator ships as an AppImage. Extracting it at build time keeps FUSE out
+# of the runtime image and lets Eden use the host driver stack through the
+# system Vulkan loader.
+ARG EDEN_VERSION=0.2.1
+ARG EDEN_SHA256=2fae658397daf13c118082a3eb65d61a6519967b5e22e6667756baecf6000c5a
+
+RUN curl -fsSLo /tmp/eden.AppImage \
+        "https://stable.eden-emu.dev/v${EDEN_VERSION}/Eden-Linux-v${EDEN_VERSION}-amd64-gcc-standard.AppImage" \
+    && printf '%s  %s\n' "$EDEN_SHA256" /tmp/eden.AppImage | sha256sum -c - \
+    && chmod 0755 /tmp/eden.AppImage \
+    && cd /tmp \
+    && /tmp/eden.AppImage --appimage-extract >/dev/null \
+    && install -d /out/eden \
+    && cp -a /tmp/squashfs-root/. /out/eden/ \
+    && test -x /out/eden/AppRun \
+    && rm -f /tmp/eden.AppImage
+
 FROM game-base
 
 COPY --from=apollo-builder /home/builder/apollo-git/*.pkg.tar.zst /tmp/apollo/
@@ -199,13 +218,15 @@ RUN pacman -U --noconfirm /tmp/apollo/*.pkg.tar.zst && rm -rf /tmp/apollo
 COPY --from=native-builder /out/x86_64/xinput1_4.dll /usr/lib/vulcan/xinput1_4.dll
 COPY --from=native-builder /out/i686/xinput1_4.dll /usr/lib/vulcan/xinput1_4_32.dll
 COPY --from=wbg-builder /out/wbg /usr/local/bin/wbg
+COPY --from=eden-builder /out/eden /opt/eden
 
 COPY --from=rust-builder /build/target/release/libvulcan_uinput_shim.so /usr/lib/libvulcan_uinput_shim.so
 COPY --from=rust-builder /build/target/release/vulcan-inputd /usr/local/bin/vulcan-inputd
+COPY --from=rust-builder /build/target/release/vulcan-dsud /usr/local/bin/vulcan-dsud
 
 COPY --from=vkcapture-builder /out/usr/ /usr/
 
-RUN mkdir -p /config/apollo /data /games /games-ro \
+RUN mkdir -p /config/apollo /data /games /games-ro /eden-content \
     && chown -R 1000:1000 /data /games
 
 COPY config/sway /config/sway
@@ -218,6 +239,8 @@ COPY scripts /usr/local/bin
 RUN chmod 0755 \
         /usr/local/bin/*.sh \
         /usr/local/bin/vulcan-inputd \
+        /usr/local/bin/vulcan-dsud \
+    && ln -s /usr/local/bin/eden-wrapper.sh /usr/local/bin/eden \
     && chmod 0644 \
         /usr/lib/vulcan/xinput1_4.dll \
         /usr/lib/vulcan/xinput1_4_32.dll \

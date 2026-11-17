@@ -38,6 +38,8 @@ APOLLO_PKG ?= apollo-git
 APOLLO_COMMIT ?= adc5c5a0bd80831ce495434bb16aee2cd4175fb8
 MIRROR_COUNTRY ?=
 OBS_VKCAPTURE_REF ?= v1.5.6
+EDEN_VERSION ?= 0.2.1
+EDEN_SHA256 ?= 2fae658397daf13c118082a3eb65d61a6519967b5e22e6667756baecf6000c5a
 GAMES_CATALOG ?= games.yaml
 AUDIO_RUNTIME_DIR ?= $(if $(XDG_RUNTIME_DIR),$(XDG_RUNTIME_DIR),/run/user/$(shell id -u))/vulcan/$(SESSION_ID)
 AUDIO_LATENCY_MSEC ?= 60
@@ -58,10 +60,11 @@ BASE_HASH := $(shell cat $(BASE_INPUTS) | sha256sum | cut -c1-12)
 BASE_TAG := local-$(shell printf '%s|%s' "$(MIRROR_COUNTRY)" "$(BASE_HASH)" | sha256sum | cut -c1-12)
 BASE_IMAGE := vulcan/base:$(BASE_TAG)
 export BASE_IMAGE
+export EDEN_VERSION EDEN_SHA256
 
 # One image per build variant, so a preset never overwrites the image another
 # preset runs on.
-IMAGE_TAG := local-$(shell printf '%s' '$(BASE_TAG)|$(GPU_VENDOR)|$(APOLLO_PKG)|$(APOLLO_COMMIT)|$(OBS_VKCAPTURE_REF)' | sha256sum | cut -c1-12)
+IMAGE_TAG := local-$(shell printf '%s' '$(BASE_TAG)|$(GPU_VENDOR)|$(APOLLO_PKG)|$(APOLLO_COMMIT)|$(OBS_VKCAPTURE_REF)|$(EDEN_VERSION)|$(EDEN_SHA256)' | sha256sum | cut -c1-12)
 IMAGE := vulcan/game-stream:$(IMAGE_TAG)
 export IMAGE_TAG
 
