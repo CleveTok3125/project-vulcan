@@ -41,7 +41,8 @@ check_contains 'capture is enabled by default' 'OBS_VKCAPTURE: "${OBS_VKCAPTURE:
 check_contains 'compose passes the capture name override' 'OBS_VKCAPTURE_NAME' "$compose"
 check_contains 'image tag includes the capture ref' '$(OBS_VKCAPTURE_REF)' "$makefile"
 check_contains 'launcher defaults capture on' 'OBS_VKCAPTURE="${OBS_VKCAPTURE:-1}"' "$launcher"
-check_contains 'launcher wraps the wine runner' 'runner=("$OBS_GAMECAPTURE_BIN" "${runner[@]}")' "$launcher"
+check_contains 'launcher wraps the runner' 'target=("$OBS_GAMECAPTURE_BIN" "${target[@]}")' "$launcher"
+check_contains 'launcher uses the capture helper for wine' 'wrap_capture runner' "$launcher"
 check_contains 'capture name is session scoped' 'OBS_VKCAPTURE_NAME' "$launcher"
 
 if [ "$failures" -ne 0 ]; then

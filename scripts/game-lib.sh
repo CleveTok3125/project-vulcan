@@ -72,6 +72,37 @@ catalog_has_eden_runner() {
     return 1
 }
 
+# gamescope_args fills an array with the nested gamescope command line.
+#
+# Callers pass the array name; the defaults match the launcher environment so
+# every app that runs under gamescope shares one definition.
+gamescope_args() {
+    local -n args="$1"
+    local width="${GAME_WIDTH:-1920}"
+    local height="${GAME_HEIGHT:-1080}"
+    local fps="${GAME_FPS:-144}"
+
+    args=(
+        --backend wayland
+        -W "$width" -H "$height"
+        -w "$width" -h "$height"
+        -r "$fps"
+        -f
+        -C "${GAMESCOPE_HIDE_CURSOR_DELAY:-86400000}"
+        --default-touch-mode "${GAMESCOPE_TOUCH_MODE:-4}"
+    )
+    if [ "${GAMESCOPE_RT:-0}" = "1" ]; then
+        args+=(--rt)
+    fi
+    if [ "${GAMESCOPE_GRAB_CURSOR:-1}" = "1" ]; then
+        args+=(--force-grab-cursor)
+    fi
+    if [ "${GAMESCOPE_FORCE_WINDOWS_FULLSCREEN:-1}" = "1" ]; then
+        args+=(--force-windows-fullscreen)
+    fi
+    return 0
+}
+
 # build_app_specs prints the Apollo app specs as a JSON array.
 #
 # Each spec carries the catalog name, the launcher command, and a stable UUID.

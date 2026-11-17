@@ -18,10 +18,34 @@ check() {
 }
 
 fake_root="$workdir/wine"
-mkdir -p "$fake_root/bin" "$workdir/bin" "$workdir/games/test" "$workdir/games/other" "$workdir/home" "$workdir/wine-mount/other/bin" \
+mkdir -p "$fake_root/bin" "$workdir/bin" "$workdir/games/test" "$workdir/games/other" \
+    "$workdir/games/native" "$workdir/home" "$workdir/wine-mount/other/bin" \
     "$workdir/rumble" "$workdir/rumble-custom"
 capture_log="$workdir/capture.log"
+eden_log="$workdir/eden.log"
+dsud_log="$workdir/dsud.log"
 : >"$capture_log"
+: >"$eden_log"
+: >"$dsud_log"
+: >"$workdir/games/native/game.xci"
+
+cat >"$workdir/bin/eden" <<'EOF'
+#!/bin/sh
+printf 'eden:%s\n' "$*" >>"${EDEN_LOG:?}"
+if [ "${FAKE_EDEN_SLEEP:-0}" = "1" ]; then
+    exec -a eden-fake sleep 30
+fi
+# Give the controller server time to start before this process exits.
+sleep 0.3
+exit "${FAKE_EDEN_STATUS:-0}"
+EOF
+cat >"$workdir/bin/vulcan-dsud" <<'EOF'
+#!/bin/bash
+printf 'dsud:%s\n' "$*" >>"${DSUD_LOG:?}"
+printf '%s\n' "$$" >"${DSUD_PID_FILE:?}"
+exec -a vulcan-dsud-fake sleep 30
+EOF
+chmod 0755 "$workdir/bin/eden" "$workdir/bin/vulcan-dsud"
 
 cat >"$workdir/bin/obs-gamecapture" <<'EOF'
 #!/bin/sh
@@ -115,6 +139,13 @@ cat >"$catalog" <<'EOF'
       "source": "/srv/games/other",
       "exe": "Other.exe",
       "wine_source": "/srv/wine/other"
+    },
+    {
+      "id": "native",
+      "name": "Native Game",
+      "runner": "eden",
+      "source": "/srv/games/native",
+      "rom": "game.xci"
     }
   ]
 }
@@ -138,6 +169,10 @@ run_launch() {
         D3D_BACKEND=wined3d \
         XINPUT_DLL="$workdir/missing.dll" \
         WINE_LOG="$wine_log" \
+        EDEN_LOG="$eden_log" \
+        DSUD_LOG="$dsud_log" \
+        DSUD_PID_FILE="$workdir/dsud.pid" \
+        VULCAN_DSUD_BIN="$workdir/bin/vulcan-dsud" \
         "$@" bash "$repo_root/scripts/launch-game.sh" "$game_id"
 }
 
@@ -420,6 +455,59 @@ set -e
 check 'failed init exits non-zero' 'yes' "$([ "$status" -ne 0 ] && printf yes || printf no)"
 check 'failed init reports the prefix' '1' "$(grep -c 'Wine prefix initialization failed' "$workdir/fail.log")"
 check 'failed init does not start the game' '1' "$(grep -c '^wineboot --init$' "$wine_log")"
+
+# A native emulator entry starts the emulator and the DSU controller server.
+: >"$wine_log"
+: >"$eden_log"
+: >"$dsud_log"
+rm -f "$workdir/dsud.pid"
+run_launch native 2>"$workdir/eden-launch.log"
+check 'eden receives the rom' "eden:-f -g $workdir/games/native/game.xci" "$(cat "$eden_log")"
+check 'eden launch does not touch wine' '0' "$(wc -l <"$wine_log")"
+check 'dsud receives the pad file' \
+    "dsud:--pad-file /data/vulcan-gamepad.bin --port 26760" "$(head -n 1 "$dsud_log")"
+check 'dsud stops with the emulator' 'no' \
+    "$([ -e "$workdir/dsud.pid" ] && kill -0 "$(cat "$workdir/dsud.pid")" 2>/dev/null && printf yes || printf no)"
+
+# The controller server can be disabled for troubleshooting.
+: >"$dsud_log"
+run_launch native VULCAN_DSUD=0 2>"$workdir/eden-no-dsud.log"
+check 'dsud can be disabled' '0' "$(wc -l <"$dsud_log")"
+
+# gamescope wraps the emulator and the capture sender stays inside it.
+: >"$capture_log"
+run_launch native GAMESCOPE_ENABLED=1 2>"$workdir/eden-gamescope.log"
+check 'gamescope is the outer command for eden' 'gamescope:' \
+    "$(head -n 1 "$capture_log" | cut -d: -f1):"
+check 'eden runs inside gamescope' 'gamecapture:' \
+    "$(sed -n '2p' "$capture_log" | cut -d: -f1):"
+
+# A missing rom aborts before the emulator starts.
+mv "$workdir/games/native/game.xci" "$workdir/games/native/game.xci.bak"
+: >"$eden_log"
+set +e
+run_launch native 2>"$workdir/eden-missing-rom.log"
+status=$?
+set -e
+mv "$workdir/games/native/game.xci.bak" "$workdir/games/native/game.xci"
+check 'missing rom exits non-zero' 'yes' "$([ "$status" -ne 0 ] && printf yes || printf no)"
+check 'missing rom is reported' '1' "$(grep -c 'game rom not found' "$workdir/eden-missing-rom.log")"
+check 'missing rom starts no emulator' '0' "$(wc -l <"$eden_log")"
+
+# A missing emulator is reported.
+set +e
+run_launch native EDEN_BIN="$workdir/missing-eden" 2>"$workdir/eden-missing.log"
+status=$?
+set -e
+check 'missing eden exits non-zero' 'yes' "$([ "$status" -ne 0 ] && printf yes || printf no)"
+check 'missing eden is reported' '1' "$(grep -c 'eden not found' "$workdir/eden-missing.log")"
+
+# The emulator exit status reaches Apollo.
+set +e
+run_launch native FAKE_EDEN_STATUS=7 2>"$workdir/eden-status.log"
+status=$?
+set -e
+check 'eden exit status is preserved' '7' "$status"
 
 # A second launch is rejected while another game holds the lock.
 mkdir -p "$workdir/run"

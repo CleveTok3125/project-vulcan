@@ -26,14 +26,17 @@ if [ -z "$game_name" ]; then
 fi
 printf '[vulcan] starting %s (%s)\n' "$game_name" "$GAME_ID" >&2
 
-game_exe_rel="$(game_field "$GAMES_CATALOG_PATH" "$GAME_ID" exe)"
+GAME_RUNNER="$(game_runner "$GAMES_CATALOG_PATH" "$GAME_ID")"
 export GAME_ID
-export GAME_EXE="${GAMES_MOUNT}/${GAME_ID}/${game_exe_rel}"
-GAME_RESET_PATHS="$(game_reset_paths "$GAMES_CATALOG_PATH" "$GAME_ID" | paste -sd: -)"
-export GAME_RESET_PATHS
-export WINEPREFIX="${WINEPREFIX:-${PREFIX_ROOT}/${GAME_ID}}"
-if [ -n "$(game_field "$GAMES_CATALOG_PATH" "$GAME_ID" wine_source)" ]; then
-    export WINE_ROOT="${WINE_MOUNT}/${GAME_ID}"
+if [ "$GAME_RUNNER" = "wine" ]; then
+    game_exe_rel="$(game_field "$GAMES_CATALOG_PATH" "$GAME_ID" exe)"
+    export GAME_EXE="${GAMES_MOUNT}/${GAME_ID}/${game_exe_rel}"
+    GAME_RESET_PATHS="$(game_reset_paths "$GAMES_CATALOG_PATH" "$GAME_ID" | paste -sd: -)"
+    export GAME_RESET_PATHS
+    export WINEPREFIX="${WINEPREFIX:-${PREFIX_ROOT}/${GAME_ID}}"
+    if [ -n "$(game_field "$GAMES_CATALOG_PATH" "$GAME_ID" wine_source)" ]; then
+        export WINE_ROOT="${WINE_MOUNT}/${GAME_ID}"
+    fi
 fi
 
 # One container owns one display, audio sink, and input socket. Keep one game
@@ -47,6 +50,110 @@ fi
 
 export HOME="${HOME:-/data/home}"
 export XDG_DATA_HOME="${XDG_DATA_HOME:-/data/home/.local/share}"
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-/data/home/.config}"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/data/home/.cache}"
+# No input method runs in the container; keep the host one out of the tools.
+export XMODIFIERS="${XMODIFIERS:-@im=none}"
+# Keep the NVIDIA GL shader cache instead of letting the driver prune it.
+export __GL_SHADER_DISK_CACHE_SKIP_CLEANUP="${__GL_SHADER_DISK_CACHE_SKIP_CLEANUP:-1}"
+
+GAME_WIDTH="${GAME_WIDTH:-1920}"
+GAME_HEIGHT="${GAME_HEIGHT:-1080}"
+GAME_FPS="${GAME_FPS:-144}"
+GAMESCOPE_ENABLED="${GAMESCOPE_ENABLED:-1}"
+GAMESCOPE_RT="${GAMESCOPE_RT:-0}"
+# gamescope hides a client cursor it cannot hand to the nested host, so it
+# paints the cursor into its own frames instead.
+GAMESCOPE_GRAB_CURSOR="${GAMESCOPE_GRAB_CURSOR:-1}"
+GAMESCOPE_HIDE_CURSOR_DELAY="${GAMESCOPE_HIDE_CURSOR_DELAY:-86400000}"
+GAMESCOPE_TOUCH_MODE="${GAMESCOPE_TOUCH_MODE:-4}"
+GAMESCOPE_FORCE_WINDOWS_FULLSCREEN="${GAMESCOPE_FORCE_WINDOWS_FULLSCREEN:-1}"
+
+GAMESCOPE_ARGS=()
+gamescope_args GAMESCOPE_ARGS
+
+# OBS is an optional receiver; a missing wrapper must not stop the game.
+OBS_VKCAPTURE="${OBS_VKCAPTURE:-1}"
+OBS_GAMECAPTURE_BIN="${OBS_GAMECAPTURE_BIN:-/usr/bin/obs-gamecapture}"
+
+# wrap_capture prefixes a runner array with the capture sender.
+#
+# Multiple sessions may run the same executable, so each one carries a distinct
+# capture name that OBS can select.
+wrap_capture() {
+    local -n target="$1"
+    [ "$OBS_VKCAPTURE" = "1" ] || return 0
+    export OBS_VKCAPTURE_NAME="${OBS_VKCAPTURE_NAME:-${SESSION_ID:-vulcan}-${GAME_ID}}"
+    if [ -x "$OBS_GAMECAPTURE_BIN" ]; then
+        target=("$OBS_GAMECAPTURE_BIN" "${target[@]}")
+    else
+        printf '[vulcan] obs-gamecapture not found: %s; OBS capture disabled\n' \
+            "$OBS_GAMECAPTURE_BIN" >&2
+    fi
+}
+
+# run_eden launches the emulator and the DSU controller server.
+#
+# Eden keeps its data in the session volume: firmware, saves, installed
+# updates, and the controller mapping. The game itself stays on the read-only
+# image mount.
+run_eden() {
+    local rom game_path eden_bin dsud_bin dsud_pid=""
+
+    rom="$(game_field "$GAMES_CATALOG_PATH" "$GAME_ID" rom)"
+    game_path="${GAMES_MOUNT}/${GAME_ID}/${rom}"
+    if [ ! -e "$game_path" ]; then
+        printf '[vulcan] game rom not found: %s\n' "$game_path" >&2
+        exit 1
+    fi
+
+    eden_bin="${EDEN_BIN:-eden}"
+    if ! command -v "$eden_bin" >/dev/null 2>&1; then
+        printf '[vulcan] eden not found: %s\n' "$eden_bin" >&2
+        exit 1
+    fi
+
+    if [ "${VULCAN_DSUD:-1}" = "1" ]; then
+        dsud_bin="${VULCAN_DSUD_BIN:-/usr/local/bin/vulcan-dsud}"
+        if [ -x "$dsud_bin" ]; then
+            "$dsud_bin" \
+                --pad-file "${VULCAN_GAMEPAD_STATE:-/data/vulcan-gamepad.bin}" \
+                --port "${VULCAN_DSUD_PORT:-26760}" &
+            dsud_pid=$!
+        else
+            printf '[vulcan] vulcan-dsud not found: %s; controller input disabled\n' \
+                "$dsud_bin" >&2
+        fi
+    fi
+
+    stop_dsud() {
+        if [ -n "${dsud_pid:-}" ]; then
+            kill -TERM "$dsud_pid" 2>/dev/null || true
+            wait "$dsud_pid" 2>/dev/null || true
+        fi
+    }
+    trap stop_dsud EXIT
+    trap 'stop_dsud; exit 143' TERM INT
+
+    local -a runner=("$eden_bin" -f -g "$game_path")
+    wrap_capture runner
+
+    if [ "$GAMESCOPE_ENABLED" = "1" ]; then
+        gamescope "${GAMESCOPE_ARGS[@]}" -- "${runner[@]}" &
+    else
+        "${runner[@]}" &
+    fi
+    game_pid=$!
+
+    local status=0
+    wait "$game_pid" || status=$?
+    exit "$status"
+}
+
+if [ "$GAME_RUNNER" = "eden" ]; then
+    run_eden
+fi
+
 export WINE_ROOT="${WINE_ROOT:-${PROTONPATH:-/data/spritz-wine-tkg}}"
 export UMU_USE_STEAM="${UMU_USE_STEAM:-1}"
 export WINEDEBUG="${WINEDEBUG:--all}"
@@ -58,10 +165,6 @@ INPUT_GAMEPAD="${INPUT_GAMEPAD:-1}"
 # futex_waitv (Linux 5.16 or later).
 export WINEESYNC="${WINEESYNC:-1}"
 export WINEFSYNC="${WINEFSYNC:-1}"
-# No input method runs in the container; keep the host one out of Wine.
-export XMODIFIERS="${XMODIFIERS:-@im=none}"
-# Keep the NVIDIA GL shader cache instead of letting the driver prune it.
-export __GL_SHADER_DISK_CACHE_SKIP_CLEANUP="${__GL_SHADER_DISK_CACHE_SKIP_CLEANUP:-1}"
 # Empty by default; set to e.g. fps,frametimes to show the DXVK overlay.
 export DXVK_HUD="${DXVK_HUD:-}"
 D3D_BACKEND="${D3D_BACKEND:-dxvk}"
@@ -82,18 +185,6 @@ if [ "$INPUT_GAMEPAD" = "1" ]; then
 fi
 
 DXVK_DIR="${DXVK_DIR:-/data/dxvk}"
-
-GAME_WIDTH="${GAME_WIDTH:-1920}"
-GAME_HEIGHT="${GAME_HEIGHT:-1080}"
-GAME_FPS="${GAME_FPS:-144}"
-GAMESCOPE_ENABLED="${GAMESCOPE_ENABLED:-1}"
-GAMESCOPE_RT="${GAMESCOPE_RT:-0}"
-# gamescope hides a client cursor it cannot hand to the nested host, so it
-# paints the cursor into its own frames instead.
-GAMESCOPE_GRAB_CURSOR="${GAMESCOPE_GRAB_CURSOR:-1}"
-GAMESCOPE_HIDE_CURSOR_DELAY="${GAMESCOPE_HIDE_CURSOR_DELAY:-86400000}"
-GAMESCOPE_TOUCH_MODE="${GAMESCOPE_TOUCH_MODE:-4}"
-GAMESCOPE_FORCE_WINDOWS_FULLSCREEN="${GAMESCOPE_FORCE_WINDOWS_FULLSCREEN:-1}"
 
 if [ ! -e "$GAME_EXE" ]; then
     printf '[vulcan] game executable not found: %s\n' "$GAME_EXE" >&2
@@ -117,22 +208,9 @@ fi
 
 runner=("$wine_bin" "$GAME_EXE")
 
-# Mirror the Lutris prefix command: keep the capture layer inside gamescope
-# and wrap only the Wine process. OBS is an optional receiver; a missing
-# wrapper must not stop the game.
-OBS_VKCAPTURE="${OBS_VKCAPTURE:-1}"
-OBS_GAMECAPTURE_BIN="${OBS_GAMECAPTURE_BIN:-/usr/bin/obs-gamecapture}"
-if [ "$OBS_VKCAPTURE" = "1" ]; then
-    # Multiple sessions may run the same executable. Give each session/game a
-    # distinct name so OBS can select the right client.
-    export OBS_VKCAPTURE_NAME="${OBS_VKCAPTURE_NAME:-${SESSION_ID:-vulcan}-${GAME_ID}}"
-    if [ -x "$OBS_GAMECAPTURE_BIN" ]; then
-        runner=("$OBS_GAMECAPTURE_BIN" "${runner[@]}")
-    else
-        printf '[vulcan] obs-gamecapture not found: %s; OBS capture disabled\n' \
-            "$OBS_GAMECAPTURE_BIN" >&2
-    fi
-fi
+# Mirror the Lutris prefix command: the capture layer stays inside gamescope
+# and wraps only the Wine process.
+wrap_capture runner
 
 # The prefix lives in the container volume. A fresh volume starts empty, so
 # create the default Wine prefix here instead of shipping one in the image.
@@ -279,27 +357,7 @@ if [ "$INPUT_GAMEPAD" = "1" ]; then
 fi
 
 if [ "$GAMESCOPE_ENABLED" = "1" ]; then
-    args=(
-        --backend wayland
-        -W "$GAME_WIDTH" -H "$GAME_HEIGHT"
-        -w "$GAME_WIDTH" -h "$GAME_HEIGHT"
-        -r "$GAME_FPS"
-        -f
-        -C "$GAMESCOPE_HIDE_CURSOR_DELAY"
-        --default-touch-mode "$GAMESCOPE_TOUCH_MODE"
-    )
-
-    if [ "$GAMESCOPE_RT" = "1" ]; then
-        args+=(--rt)
-    fi
-    if [ "$GAMESCOPE_GRAB_CURSOR" = "1" ]; then
-        args+=(--force-grab-cursor)
-    fi
-    if [ "$GAMESCOPE_FORCE_WINDOWS_FULLSCREEN" = "1" ]; then
-        args+=(--force-windows-fullscreen)
-    fi
-
-    gamescope "${args[@]}" -- "${runner[@]}" &
+    gamescope "${GAMESCOPE_ARGS[@]}" -- "${runner[@]}" &
     game_pid=$!
 else
     "${runner[@]}" &
