@@ -16,7 +16,7 @@ Docker (rootful)
    ├─ Apollo (capture=wlr, NVENC or VAAPI)
    │  └─ app per catalog game
    ├─ gamescope (nested Wayland client, optional)
-   │  └─ wine + selected game
+   │  └─ wine + selected game, or eden + selected game image
    ├─ PipeWire (Apollo audio sink)
    ├─ vulcan-inputd (socket -> gamescope EIS)
    └─ vulcan-dsud (pad state -> Cemuhook UDP)
@@ -44,6 +44,9 @@ which is not available in this container.
 - [Reproducible builds](#reproducible-builds)
 - [Configuration](#configuration)
   - [Game catalog](#game-catalog)
+  - [Eden entries](#eden-entries)
+    - [Enabling the gamepad](#enabling-the-gamepad)
+    - [Texture mods](#texture-mods)
   - [Game directories and overlays](#game-directories-and-overlays)
   - [Sessions](#sessions)
   - [Session data location](#session-data-location)
@@ -191,6 +194,8 @@ directory for that volume; see [Session data location](#session-data-location).
 `games.yaml` is the source of truth:
 
 ```yaml
+eden_content: /srv/eden/content
+
 games:
   - id: demo
     name: Demo Game
@@ -205,6 +210,12 @@ games:
     reset_paths:
       - Data/Login
       - Data/Cache
+
+  - id: mario
+    name: Super Mario 3D World
+    runner: eden
+    source: /srv/games/mario
+    rom: game.xci
 ```
 
 - `id` is unique, safe as a path segment, and identifies the overlay, prefix,
@@ -212,15 +223,27 @@ games:
 - `name` is the app label shown to clients.
 - `source` is an absolute host directory. Only catalog directories are
   mounted, read-only, at `/games-ro/<id>`.
+- `runner` selects the launcher. `wine` is the default; `eden` runs a native
+  emulator, see [Eden entries](#eden-entries).
 - `exe` is relative to `source`; the writable overlay path is
-  `/games/<id>/<exe>`.
+  `/games/<id>/<exe>`. Wine entries require it.
+- `rom` is relative to `source` and selects the emulator image. Eden entries
+  require it; a file name with an apostrophe needs double quotes in the
+  catalog.
 - `reset_paths` are relative to the game directory and are removed once per
   Wine prefix, never on the host.
 - `wine_source` is optional. Set it to an absolute host Wine tree when games
   need different Wine builds; it is mounted at `/wine/<id>` and overrides the
   session `SPRITZ_DIR`. Without it, every game uses the session Wine tree.
+- `eden_content` is optional and session-wide. It is an absolute host
+  directory mounted read-only at `/eden-content` for updates and DLC.
 - `uuid` is optional. Empty derives a stable UUID from `id`; set it to keep an
   existing client app identity.
+
+Every entry mounts exactly one `source` directory, whatever its runner, because
+the overlay needs a directory as its lower layer. Several entries may share one
+`source`, each naming its own `exe` or `rom`; that is how a directory holding
+several game images is used.
 
 The container creates one Wine prefix per game under `/data/prefix/<id>` on
 the first launch.
@@ -229,6 +252,88 @@ Apollo reads one app per catalog entry from `/data/apollo/apps.json`. Selecting
 an app starts `launch-game.sh <id>`, which resolves that game's overlay, Wine
 prefix, and reset paths. The container runs one game at a time; a second app
 start exits while the first holds the session lock.
+
+### Eden entries
+
+An `eden` entry runs the Switch emulator directly. The game image stays on the
+read-only mount instead of being installed into the emulated NAND. Eden writes
+firmware, saves, shader caches, updates, and DLC below
+`/data/home/.local/share/eden`, so they survive container recreation.
+
+The emulator reads `prod.keys` and the installed firmware from that directory.
+Install them once from your own console dump, through the setup app below or
+by copying the files into the session volume.
+
+`eden_content` mounts an absolute host directory read-only at `/eden-content`
+as a source for updates and DLC.
+
+Any session with an `eden` entry also gets an `Eden Setup` app. It opens the
+emulator without a game, so the first-run work can be done once per session
+volume:
+
+- `Tools → Install Decryption Keys` selects `prod.keys`.
+- `Tools → Install Firmware → From ZIP` installs the firmware archive.
+- `File → Install Files to NAND…` installs updates and DLC.
+
+Eden does not use `PRODINFO.bin` or the console certificate.
+
+The firmware archive is only read during the install: Eden stores the extracted
+titles under `nand/system` and reads those. Any path Eden can browse works, and
+a directory inside the session volume needs no extra mount; the optional
+`eden_content` mount is one way to expose a host directory. Delete the archive,
+and the mount if one was used, once the install finishes. `prod.keys` must
+stay, because Eden reads it on every start.
+
+With the default Docker volume there is no host path to copy into, so the files
+have to travel through the container and then change owner; Eden runs as the
+game user and cannot read a root-only `prod.keys`:
+
+```bash
+docker cp Firmware.zip vulcan-<session>:/data/home/eden-content/
+docker cp prod.keys vulcan-<session>:/data/home/.local/share/eden/keys/
+docker exec vulcan-<session> chown 1000:1000 \
+  /data/home/eden-content/Firmware.zip \
+  /data/home/.local/share/eden/keys/prod.keys
+docker exec vulcan-<session> chmod 600 /data/home/.local/share/eden/keys/prod.keys
+```
+
+#### Enabling the gamepad
+
+Controller input arrives over Cemuhook (DSU) UDP: `vulcan-dsud` serves the pad
+state that `vulcan-inputd` writes on `127.0.0.1:26760`. Eden disables the UDP
+client by default, so enable it once per volume:
+
+1. `Emulation → Configure → Input → Advanced`, tick
+   `Enable UDP controllers (not needed for motion)`.
+2. Close and reopen the setup app. The UDP client starts with the emulator, so
+   the device only appears after the restart.
+3. `Emulation → Configure → Input → Player 1`: select `UDP Controller 0` and
+   press `Configure` to fill the buttons and sticks.
+
+The server address and port are the `udp_input_servers` entry in
+`qt-config.ini`; the default `127.0.0.1:26760` matches the server. Sessions
+share the host network namespace, so when two sessions run Eden at the same
+time set `VULCAN_DSUD_PORT` and `udp_input_servers` to the same distinct port.
+Eden generates the device identifier itself, so the mapping stays out of the
+catalog.
+
+Native entries have no rumble: Eden's DSU client has no rumble message, and
+the XInput proxy only exists inside Wine. `VULCAN_DSUD=0` starts the emulator
+without the controller server.
+
+#### Texture mods
+
+Eden loads mods from the session volume without a setting:
+
+```text
+/data/home/.local/share/eden/load/<title id>/<mod name>/romfs/...
+```
+
+The tree under `romfs` mirrors the game's own tree, so a mod replaces the
+files it ships. `<title id>` is the base title, for example
+`010028600EBDA000` for Super Mario 3D World + Bowser's Fury. Several mods can
+sit side by side, one directory each, and a mod may also ship `exefs` and
+`cheats`. A mod is user content: match it to the installed game version.
 
 ### Game directories and overlays
 
@@ -1003,6 +1108,11 @@ Additional hardening:
   profile.
 - Multi-touch does not reach the game: gamescope 3.17 has no EIS touch
   capability.
+- Native entries have no rumble. Eden reads pads from the DSU server, and its
+  DSU client has no rumble message; the XInput proxy that forwards rumble only
+  exists inside a Wine prefix.
+- A native entry needs `prod.keys` and firmware in its session volume, and its
+  controller mapping is created once per volume through the setup app.
 - OBS audio is an opt-in host tunnel. The source exists only while the Apollo
   stream runs; `AUDIO_MONITOR=1` adds a host loopback with its own latency and
   no synchronization with client video.
