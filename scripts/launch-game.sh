@@ -116,7 +116,7 @@ run_eden() {
     if [ "${VULCAN_DSUD:-1}" = "1" ]; then
         dsud_bin="${VULCAN_DSUD_BIN:-/usr/local/bin/vulcan-dsud}"
         if [ -x "$dsud_bin" ]; then
-            "$dsud_bin" \
+            "$dsud_bin" 9>&- \
                 --pad-file "${VULCAN_GAMEPAD_STATE:-/data/vulcan-gamepad.bin}" \
                 --port "${VULCAN_DSUD_PORT:-26760}" &
             dsud_pid=$!
@@ -139,9 +139,9 @@ run_eden() {
     wrap_capture runner
 
     if [ "$GAMESCOPE_ENABLED" = "1" ]; then
-        gamescope "${GAMESCOPE_ARGS[@]}" -- "${runner[@]}" &
+        gamescope "${GAMESCOPE_ARGS[@]}" -- "${runner[@]}" 9>&- &
     else
-        "${runner[@]}" &
+        "${runner[@]}" 9>&- &
     fi
     game_pid=$!
 
@@ -357,10 +357,10 @@ if [ "$INPUT_GAMEPAD" = "1" ]; then
 fi
 
 if [ "$GAMESCOPE_ENABLED" = "1" ]; then
-    gamescope "${GAMESCOPE_ARGS[@]}" -- "${runner[@]}" &
+    gamescope "${GAMESCOPE_ARGS[@]}" -- "${runner[@]}" 9>&- &
     game_pid=$!
 else
-    "${runner[@]}" &
+    "${runner[@]}" 9>&- &
     game_pid=$!
 fi
 

@@ -29,6 +29,13 @@ gamescope_log="$workdir/gamescope.log"
 cat >"$workdir/bin/eden" <<'EOF'
 #!/bin/sh
 printf 'eden:%s\n' "$*" >>"${EDEN_LOG:?}"
+_lock=no
+for _fd in /proc/self/fd/*; do
+    case "$(readlink "$_fd" 2>/dev/null)" in
+        *game.lock*) _lock=yes ;;
+    esac
+done
+printf '%s\n' "$_lock" >"${EDEN_LOCK_LOG:?}"
 # Give the controller server time to start before this process exits.
 sleep 0.3
 exit 0
@@ -82,6 +89,7 @@ run_setup() {
         VULCAN_RUN_DIR="$workdir/run" \
         VULCAN_DSUD_BIN="$workdir/bin/vulcan-dsud" \
         EDEN_LOG="$eden_log" \
+        EDEN_LOCK_LOG="$workdir/eden-lock" \
         DSUD_LOG="$dsud_log" \
         GAMESCOPE_LOG="$gamescope_log" \
         DSUD_PID_FILE="$workdir/dsud.pid" \
@@ -90,6 +98,7 @@ run_setup() {
 
 run_setup 2>"$workdir/setup.log"
 check 'setup opens eden without a game' 'eden:' "$(cat "$eden_log")"
+check 'setup does not leak the session lock' 'no' "$(cat "$workdir/eden-lock")"
 check 'setup runs under gamescope' 'yes' \
     "$(grep -q '^gamescope:.*--backend wayland' "$gamescope_log" && printf yes || printf no)"
 check 'setup starts the dsu server' \

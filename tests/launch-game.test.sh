@@ -32,6 +32,13 @@ dsud_log="$workdir/dsud.log"
 cat >"$workdir/bin/eden" <<'EOF'
 #!/bin/sh
 printf 'eden:%s\n' "$*" >>"${EDEN_LOG:?}"
+_lock=no
+for _fd in /proc/self/fd/*; do
+    case "$(readlink "$_fd" 2>/dev/null)" in
+        *game.lock*) _lock=yes ;;
+    esac
+done
+printf '%s\n' "$_lock" >"${EDEN_LOCK_LOG:?}"
 if [ "${FAKE_EDEN_SLEEP:-0}" = "1" ]; then
     exec -a eden-fake sleep 30
 fi
@@ -170,6 +177,7 @@ run_launch() {
         XINPUT_DLL="$workdir/missing.dll" \
         WINE_LOG="$wine_log" \
         EDEN_LOG="$eden_log" \
+        EDEN_LOCK_LOG="$workdir/eden-lock" \
         DSUD_LOG="$dsud_log" \
         DSUD_PID_FILE="$workdir/dsud.pid" \
         VULCAN_DSUD_BIN="$workdir/bin/vulcan-dsud" \
@@ -464,6 +472,7 @@ rm -f "$workdir/dsud.pid"
 run_launch native 2>"$workdir/eden-launch.log"
 check 'eden receives the rom' "eden:-f -g $workdir/games/native/game.xci" "$(cat "$eden_log")"
 check 'eden launch does not touch wine' '0' "$(wc -l <"$wine_log")"
+check 'eden does not inherit the session lock' 'no' "$(cat "$workdir/eden-lock")"
 check 'dsud receives the pad file' \
     "dsud:--pad-file /data/vulcan-gamepad.bin --port 26760" "$(head -n 1 "$dsud_log")"
 check 'dsud stops with the emulator' 'no' \

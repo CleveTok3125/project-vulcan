@@ -41,7 +41,7 @@ dsud_pid=""
 if [ "${VULCAN_DSUD:-1}" = "1" ]; then
     dsud_bin="${VULCAN_DSUD_BIN:-/usr/local/bin/vulcan-dsud}"
     if [ -x "$dsud_bin" ]; then
-        "$dsud_bin" \
+        "$dsud_bin" 9>&- \
             --pad-file "${VULCAN_GAMEPAD_STATE:-/data/vulcan-gamepad.bin}" \
             --port "${VULCAN_DSUD_PORT:-26760}" &
         dsud_pid=$!
@@ -67,9 +67,9 @@ GAMESCOPE_ENABLED="${GAMESCOPE_ENABLED:-1}"
 if [ "$GAMESCOPE_ENABLED" = "1" ] && command -v gamescope >/dev/null 2>&1; then
     GAMESCOPE_ARGS=()
     gamescope_args GAMESCOPE_ARGS
-    gamescope "${GAMESCOPE_ARGS[@]}" -- "$eden_bin" &
+    gamescope "${GAMESCOPE_ARGS[@]}" -- "$eden_bin" 9>&- &
 else
-    "$eden_bin" &
+    "$eden_bin" 9>&- &
 fi
 app_pid=$!
 
