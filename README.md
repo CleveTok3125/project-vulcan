@@ -314,11 +314,11 @@ The server address and port are the `udp_input_servers` entry in
 `qt-config.ini`; the default `127.0.0.1:26760` matches the server. Without a
 connected pad the server reports a centred, button-less pad, so the emulator
 never sees a deflected stick. The endpoint is exclusive: the launcher refuses
-to start the emulator when another process owns it, and a second session that
-runs Eden at the same time sets `VULCAN_DSUD_PORT` and matches
-`udp_input_servers` to it. Sessions share the host network namespace, so a
-distinct port separates them but does not isolate them; a process in another
-session can still reach the endpoint.
+to start the emulator when another process owns it. A second session that runs
+Eden at the same time in the default `SESSION_NETWORK=host` sets
+`VULCAN_DSUD_PORT` and matches `udp_input_servers` to it, because the host
+namespace is shared. `SESSION_NETWORK=netns` keeps the default port private to
+the session.
 Eden generates the device identifier itself, so the mapping stays out of the
 catalog.
 
@@ -449,8 +449,8 @@ metadata and the directory manually after verifying the backup.
 ### Ports
 
 Every preset that runs at the same time needs a non-overlapping
-`APOLLO_PORT`, because Apollo binds on the host network and derives all of its
-ports from that value:
+`APOLLO_PORT`, because Apollo derives all of its listeners from that value and
+every listener ends up on the host:
 
 | Protocol | Ports |
 | --- | --- |
@@ -463,6 +463,18 @@ example uses `48006`; a second session on `48040` does not overlap it. Run
 `restart` run the same check. `make ports P=".env.multi:.env.other"` prints the
 derived table for those presets. Clients that only use the default port cannot
 reach a preset with a custom base port.
+
+`SESSION_NETWORK` selects how the session reaches those ports:
+
+- `host` is the default. The container shares the host network namespace,
+  Apollo binds the ports directly, and the OBS capture sender reaches the host
+  plugin over its abstract unix socket.
+- `netns` gives the session its own network namespace and publishes the same
+  ports from `.generated/compose.netns.yaml`. Loopback stays inside the
+  session, so the gamepad server and Wine services are isolated between
+  sessions. The client still uses the host address and the same port numbers.
+  OBS capture is skipped, and LAN broadcast discovery does not cross the
+  bridge.
 
 Both sessions share one GPU, so VRAM and memory bandwidth apply to the sum of
 the streams. On NVIDIA, the NVENC session limit and device configuration also
@@ -660,10 +672,9 @@ client connection and falls back to shared memory. The sample preset leaves
 both unset; the tested session uses GLES2 without the software fallback.
 
 Sway does not start Xwayland while gamescope is enabled: gamescope runs its
-own X server for Wine, and Sway's instance would only compete for the abstract
-X11 socket names that the host already owns, because the container uses the
-host network namespace. `GAMESCOPE_ENABLED=0` re-enables Xwayland for the
-direct Sway path.
+own X server for Wine, and in the default host mode Sway's instance would only
+compete for the abstract X11 socket names that the host already owns.
+`GAMESCOPE_ENABLED=0` re-enables Xwayland for the direct Sway path.
 
 ### OBS capture
 
@@ -675,8 +686,10 @@ container: Wine/game -> obs-vkcapture layer -> abstract socket
 host:      OBS -> linux-vkcapture plugin -> DMA-BUF
 ```
 
-The container uses `network_mode: host`, so both sides share the abstract
-socket. This does not change the Sway/Apollo path.
+The sender and the plugin meet on an abstract unix socket, which the kernel
+scopes to the network namespace. Capture therefore needs
+`SESSION_NETWORK=host`, the default; a `netns` session skips the capture
+sender with a warning. This does not change the Sway/Apollo path.
 
 `OBS_VKCAPTURE=1` is the default. The capture source name defaults to
 `<SESSION_ID>-<GAME_ID>`, so two sessions running the same executable remain
@@ -968,6 +981,12 @@ discovered path.
 No input device is created in the host kernel, so neither session can see or
 grab the other's devices.
 
+The default `SESSION_NETWORK=host` shares the host network namespace, so
+loopback endpoints such as the gamepad server are reachable from every
+session. `SESSION_NETWORK=netns` gives the session its own namespace and
+publishes only the Apollo ports, which isolates those endpoints; OBS capture
+needs the shared namespace and is skipped.
+
 ## Logs
 
 ```bash
@@ -1116,9 +1135,10 @@ Additional hardening:
 - Native entries have no rumble. Eden reads pads from the DSU server, and its
   DSU client has no rumble message; the XInput proxy that forwards rumble only
   exists inside a Wine prefix.
-- The DSU server listens on loopback inside the host network namespace, which
-  every session shares. Concurrent Eden sessions need distinct
-  `VULCAN_DSUD_PORT` values; the port is a collision guard, not isolation.
+- The DSU server listens on loopback. In the default `SESSION_NETWORK=host`
+  every session shares that namespace, so concurrent Eden sessions need
+  distinct `VULCAN_DSUD_PORT` values; `SESSION_NETWORK=netns` isolates the
+  endpoint but disables OBS capture.
 - A native entry needs `prod.keys` and firmware in its session volume, and its
   controller mapping is created once per volume through the setup app.
 - OBS audio is an opt-in host tunnel. The source exists only while the Apollo
