@@ -311,9 +311,14 @@ client by default, so enable it once per volume:
    press `Configure` to fill the buttons and sticks.
 
 The server address and port are the `udp_input_servers` entry in
-`qt-config.ini`; the default `127.0.0.1:26760` matches the server. Sessions
-share the host network namespace, so when two sessions run Eden at the same
-time set `VULCAN_DSUD_PORT` and `udp_input_servers` to the same distinct port.
+`qt-config.ini`; the default `127.0.0.1:26760` matches the server. Without a
+connected pad the server reports a centred, button-less pad, so the emulator
+never sees a deflected stick. The endpoint is exclusive: the launcher refuses
+to start the emulator when another process owns it, and a second session that
+runs Eden at the same time sets `VULCAN_DSUD_PORT` and matches
+`udp_input_servers` to it. Sessions share the host network namespace, so a
+distinct port separates them but does not isolate them; a process in another
+session can still reach the endpoint.
 Eden generates the device identifier itself, so the mapping stays out of the
 catalog.
 
@@ -1111,6 +1116,9 @@ Additional hardening:
 - Native entries have no rumble. Eden reads pads from the DSU server, and its
   DSU client has no rumble message; the XInput proxy that forwards rumble only
   exists inside a Wine prefix.
+- The DSU server listens on loopback inside the host network namespace, which
+  every session shares. Concurrent Eden sessions need distinct
+  `VULCAN_DSUD_PORT` values; the port is a collision guard, not isolation.
 - A native entry needs `prod.keys` and firmware in its session volume, and its
   controller mapping is created once per volume through the setup app.
 - OBS audio is an opt-in host tunnel. The source exists only while the Apollo
