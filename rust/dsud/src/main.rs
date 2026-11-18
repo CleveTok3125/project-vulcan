@@ -23,8 +23,10 @@ const BUFFER_LEN: usize = 256;
 fn usage() -> ! {
     eprintln!(
         "usage: vulcan-dsud [--bind ADDR] [--port PORT] [--pad-file PATH]\n\
+         \t[--ready-file PATH]\n\
          \n\
-         Serves the gamepad state file over Cemuhook UDP for Eden and Cemu."
+         Serves the gamepad state file over Cemuhook UDP for Eden and Cemu.\n\
+         --ready-file is written with the bound address once the socket is ready."
     );
     process::exit(2);
 }
@@ -43,6 +45,7 @@ fn main() -> io::Result<()> {
     let mut bind = String::from("127.0.0.1");
     let mut port = DEFAULT_PORT;
     let mut pad_file = String::from(DEFAULT_PAD_FILE);
+    let mut ready_file: Option<String> = None;
 
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -61,6 +64,7 @@ fn main() -> io::Result<()> {
                 });
             }
             "--pad-file" => pad_file = value(),
+            "--ready-file" => ready_file = Some(value()),
             "-h" | "--help" => usage(),
             _ => {
                 eprintln!("unknown argument: {arg}");
@@ -75,8 +79,18 @@ fn main() -> io::Result<()> {
             format!("{bind}:{port}: {error}"),
         )
     })?;
-    let socket = UdpSocket::bind(address)?;
+    let socket = UdpSocket::bind(address).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("cannot bind {address}: {error}; set --port to a free port"),
+        )
+    })?;
     socket.set_read_timeout(Some(RECEIVE_POLL))?;
+    if let Some(path) = ready_file.as_deref() {
+        fs::write(path, format!("{address}\n")).map_err(|error| {
+            io::Error::new(error.kind(), format!("cannot write {path}: {error}"))
+        })?;
+    }
     eprintln!("vulcan-dsud listening on {address} for {pad_file}");
 
     let mut buffer = [0u8; BUFFER_LEN];

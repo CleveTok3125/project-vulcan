@@ -72,6 +72,31 @@ catalog_has_eden_runner() {
     return 1
 }
 
+# dsud_endpoint prints the loopback endpoint of the gamepad server.
+dsud_endpoint() {
+    printf '127.0.0.1:%s\n' "${VULCAN_DSUD_PORT:-26760}"
+}
+
+# wait_for_dsud waits until the gamepad server reports its bound endpoint.
+#
+# Binding is exclusive, so a server that lost the endpoint to another session
+# exits without writing the ready file. Callers must treat that as a failure:
+# the socket already belongs to a different pad.
+wait_for_dsud() {
+    local pid="$1" ready_file="$2" attempt=0
+    while [ "$attempt" -lt 100 ]; do
+        if [ -s "$ready_file" ]; then
+            return 0
+        fi
+        if ! kill -0 "$pid" 2>/dev/null; then
+            return 1
+        fi
+        attempt=$((attempt + 1))
+        sleep 0.01
+    done
+    return 1
+}
+
 # gamescope_args fills an array with the nested gamescope command line.
 #
 # Callers pass the array name; the defaults match the launcher environment so

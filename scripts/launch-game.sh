@@ -56,6 +56,9 @@ export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/data/home/.cache}"
 export XMODIFIERS="${XMODIFIERS:-@im=none}"
 # Keep the NVIDIA GL shader cache instead of letting the driver prune it.
 export __GL_SHADER_DISK_CACHE_SKIP_CLEANUP="${__GL_SHADER_DISK_CACHE_SKIP_CLEANUP:-1}"
+# The gamepad arrives as a file that the XInput proxy and the DSU server read;
+# disabling it removes both paths.
+INPUT_GAMEPAD="${INPUT_GAMEPAD:-1}"
 
 GAME_WIDTH="${GAME_WIDTH:-1920}"
 GAME_HEIGHT="${GAME_HEIGHT:-1080}"
@@ -98,7 +101,7 @@ wrap_capture() {
 # updates, and the controller mapping. The game itself stays on the read-only
 # image mount.
 run_eden() {
-    local rom game_path eden_bin dsud_bin dsud_pid=""
+    local rom game_path eden_bin dsud_bin dsud_ready="" dsud_pid=""
 
     rom="$(game_field "$GAMES_CATALOG_PATH" "$GAME_ID" rom)"
     game_path="${GAMES_MOUNT}/${GAME_ID}/${rom}"
@@ -113,27 +116,43 @@ run_eden() {
         exit 1
     fi
 
-    if [ "${VULCAN_DSUD:-1}" = "1" ]; then
-        dsud_bin="${VULCAN_DSUD_BIN:-/usr/local/bin/vulcan-dsud}"
-        if [ -x "$dsud_bin" ]; then
-            "$dsud_bin" 9>&- \
-                --pad-file "${VULCAN_GAMEPAD_STATE:-/data/vulcan-gamepad.bin}" \
-                --port "${VULCAN_DSUD_PORT:-26760}" &
-            dsud_pid=$!
-        else
-            printf '[vulcan] vulcan-dsud not found: %s; controller input disabled\n' \
-                "$dsud_bin" >&2
-        fi
-    fi
-
     stop_dsud() {
         if [ -n "${dsud_pid:-}" ]; then
             kill -TERM "$dsud_pid" 2>/dev/null || true
             wait "$dsud_pid" 2>/dev/null || true
         fi
+        if [ -n "${dsud_ready:-}" ]; then
+            rm -f -- "$dsud_ready"
+        fi
     }
     trap stop_dsud EXIT
     trap 'stop_dsud; exit 143' TERM INT
+
+    if [ "$INPUT_GAMEPAD" = "1" ] && [ "${VULCAN_DSUD:-1}" = "1" ]; then
+        dsud_bin="${VULCAN_DSUD_BIN:-/usr/local/bin/vulcan-dsud}"
+        if [ -x "$dsud_bin" ]; then
+            # The endpoint is exclusive. Another session on the host network
+            # namespace may already serve it, and the emulator would then read
+            # that session's pad, so a server that cannot bind stops the launch.
+            dsud_ready="$(mktemp "${TMPDIR:-/tmp}/vulcan-dsud.XXXXXX")"
+            rm -f -- "$dsud_ready"
+            "$dsud_bin" 9>&- \
+                --pad-file "${VULCAN_GAMEPAD_STATE:-/data/vulcan-gamepad.bin}" \
+                --port "${VULCAN_DSUD_PORT:-26760}" \
+                --ready-file "$dsud_ready" &
+            dsud_pid=$!
+            if ! wait_for_dsud "$dsud_pid" "$dsud_ready"; then
+                printf '[vulcan] controller server did not start on %s\n' \
+                    "$(dsud_endpoint)" >&2
+                printf '[vulcan] free the port or set VULCAN_DSUD_PORT; set VULCAN_DSUD=0 to play without controller input\n' >&2
+                stop_dsud
+                exit 1
+            fi
+        else
+            printf '[vulcan] vulcan-dsud not found: %s; controller input disabled\n' \
+                "$dsud_bin" >&2
+        fi
+    fi
 
     local -a runner=("$eden_bin" -f -g "$game_path")
     wrap_capture runner
@@ -158,9 +177,6 @@ export WINE_ROOT="${WINE_ROOT:-${PROTONPATH:-/data/spritz-wine-tkg}}"
 export UMU_USE_STEAM="${UMU_USE_STEAM:-1}"
 export WINEDEBUG="${WINEDEBUG:--all}"
 export WINEARCH="${WINEARCH:-win64}"
-# The gamepad arrives as a file that the XInput proxy reads; disabling it skips
-# both the file and the DLL.
-INPUT_GAMEPAD="${INPUT_GAMEPAD:-1}"
 # Eventfd/futex synchronisation avoids wineserver round trips. fsync needs
 # futex_waitv (Linux 5.16 or later).
 export WINEESYNC="${WINEESYNC:-1}"

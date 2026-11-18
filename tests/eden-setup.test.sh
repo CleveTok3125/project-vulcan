@@ -53,6 +53,17 @@ cat >"$workdir/bin/vulcan-dsud" <<'EOF'
 #!/bin/bash
 printf 'dsud:%s\n' "$*" >>"${DSUD_LOG:?}"
 printf '%s\n' "$$" >"${DSUD_PID_FILE:?}"
+if [ "${DSUD_FAIL:-0}" = "1" ]; then
+    printf 'cannot bind 127.0.0.1:26760; set --port to a free port\n' >&2
+    exit 1
+fi
+while [ "$#" -gt 0 ]; do
+    if [ "$1" = "--ready-file" ]; then
+        printf '127.0.0.1:26760\n' >"$2"
+        break
+    fi
+    shift
+done
 exec -a vulcan-dsud-fake sleep 30
 EOF
 chmod 0755 "$workdir/bin/eden" "$workdir/bin/gamescope" "$workdir/bin/vulcan-dsud"
@@ -101,8 +112,9 @@ check 'setup opens eden without a game' 'eden:' "$(cat "$eden_log")"
 check 'setup does not leak the session lock' 'no' "$(cat "$workdir/eden-lock")"
 check 'setup runs under gamescope' 'yes' \
     "$(grep -q '^gamescope:.*--backend wayland' "$gamescope_log" && printf yes || printf no)"
-check 'setup starts the dsu server' \
-    'dsud:--pad-file /data/vulcan-gamepad.bin --port 26760' "$(head -n 1 "$dsud_log")"
+check 'setup starts the dsu server' 'yes' \
+    "$(grep -q '^dsud:--pad-file /data/vulcan-gamepad.bin --port 26760 --ready-file ' "$dsud_log" \
+        && printf yes || printf no)"
 check 'setup stops the dsu server' 'no' \
     "$([ -e "$workdir/dsud.pid" ] && kill -0 "$(cat "$workdir/dsud.pid")" 2>/dev/null \
        && printf yes || printf no)"
@@ -114,6 +126,25 @@ check 'setup can skip gamescope' '0' "$(wc -l <"$gamescope_log")"
 : >"$dsud_log"
 run_setup VULCAN_DSUD=0 2>"$workdir/no-dsud.log"
 check 'setup can skip the dsu server' '0' "$(wc -l <"$dsud_log")"
+
+: >"$dsud_log"
+run_setup INPUT_GAMEPAD=0 2>"$workdir/no-pad.log"
+check 'the pad switch skips the dsu server' '0' "$(wc -l <"$dsud_log")"
+
+# The setup window also installs keys and firmware, so a controller server that
+# cannot claim the endpoint is reported and the window still opens.
+: >"$eden_log"
+set +e
+run_setup DSUD_FAIL=1 2>"$workdir/dsud-taken.log"
+status=$?
+set -e
+check 'busy controller port keeps the setup app usable' '0' "$status"
+check 'busy controller port still opens eden' 'eden:' "$(cat "$eden_log")"
+check 'busy controller port is reported by setup' '1' \
+    "$(grep -c 'controller server did not start on 127.0.0.1:26760' "$workdir/dsud-taken.log")"
+check 'busy controller port leaves no server' 'no' \
+    "$([ -e "$workdir/dsud.pid" ] && kill -0 "$(cat "$workdir/dsud.pid")" 2>/dev/null \
+       && printf yes || printf no)"
 
 set +e
 run_setup GAMES_CATALOG_PATH="$workdir/wine-only.json" 2>"$workdir/no-eden.log"

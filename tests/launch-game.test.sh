@@ -50,6 +50,17 @@ cat >"$workdir/bin/vulcan-dsud" <<'EOF'
 #!/bin/bash
 printf 'dsud:%s\n' "$*" >>"${DSUD_LOG:?}"
 printf '%s\n' "$$" >"${DSUD_PID_FILE:?}"
+if [ "${DSUD_FAIL:-0}" = "1" ]; then
+    printf 'cannot bind 127.0.0.1:26760; set --port to a free port\n' >&2
+    exit 1
+fi
+while [ "$#" -gt 0 ]; do
+    if [ "$1" = "--ready-file" ]; then
+        printf '127.0.0.1:26760\n' >"$2"
+        break
+    fi
+    shift
+done
 exec -a vulcan-dsud-fake sleep 30
 EOF
 chmod 0755 "$workdir/bin/eden" "$workdir/bin/vulcan-dsud"
@@ -473,8 +484,9 @@ run_launch native 2>"$workdir/eden-launch.log"
 check 'eden receives the rom' "eden:-f -g $workdir/games/native/game.xci" "$(cat "$eden_log")"
 check 'eden launch does not touch wine' '0' "$(wc -l <"$wine_log")"
 check 'eden does not inherit the session lock' 'no' "$(cat "$workdir/eden-lock")"
-check 'dsud receives the pad file' \
-    "dsud:--pad-file /data/vulcan-gamepad.bin --port 26760" "$(head -n 1 "$dsud_log")"
+check 'dsud receives the pad file' 'yes' \
+    "$(grep -q '^dsud:--pad-file /data/vulcan-gamepad.bin --port 26760 --ready-file ' "$dsud_log" \
+        && printf yes || printf no)"
 check 'dsud stops with the emulator' 'no' \
     "$([ -e "$workdir/dsud.pid" ] && kill -0 "$(cat "$workdir/dsud.pid")" 2>/dev/null && printf yes || printf no)"
 
@@ -482,6 +494,24 @@ check 'dsud stops with the emulator' 'no' \
 : >"$dsud_log"
 run_launch native VULCAN_DSUD=0 2>"$workdir/eden-no-dsud.log"
 check 'dsud can be disabled' '0' "$(wc -l <"$dsud_log")"
+
+# The pad switch covers the controller server as well.
+: >"$dsud_log"
+run_launch native INPUT_GAMEPAD=0 2>"$workdir/eden-no-pad.log"
+check 'the pad switch skips the controller server' '0' "$(wc -l <"$dsud_log")"
+
+# A controller server that cannot claim the endpoint stops the launch: the
+# emulator would otherwise read the pad of whichever session owns the port.
+: >"$eden_log"
+set +e
+run_launch native DSUD_FAIL=1 2>"$workdir/eden-dsud-taken.log"
+status=$?
+set -e
+check 'busy controller port exits non-zero' 'yes' \
+    "$([ "$status" -ne 0 ] && printf yes || printf no)"
+check 'busy controller port is reported' '1' \
+    "$(grep -c 'controller server did not start on 127.0.0.1:26760' "$workdir/eden-dsud-taken.log")"
+check 'busy controller port starts no emulator' '0' "$(wc -l <"$eden_log")"
 
 # gamescope wraps the emulator and the capture sender stays inside it.
 : >"$capture_log"

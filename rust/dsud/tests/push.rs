@@ -1,7 +1,9 @@
 //! Checks that the server pushes pad samples instead of answering requests.
 
+use std::io::Read;
 use std::net::UdpSocket;
-use std::process::{Child, Command, Stdio};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
 const MAGIC_CLIENT: u32 = 0x4355_5344;
@@ -28,8 +30,76 @@ fn pad_record() -> [u8; 28] {
     record
 }
 
+/// Removes the temporary directory when the test ends, including on a panic.
+struct Workdir(PathBuf);
+
+impl Workdir {
+    fn new(label: &str) -> Self {
+        let path = std::env::temp_dir().join(format!("vulcan-dsud-{label}-{}", std::process::id()));
+        std::fs::create_dir_all(&path).expect("workdir");
+        Self(path)
+    }
+
+    fn pad_file(&self) -> PathBuf {
+        let path = self.0.join("gamepad.bin");
+        std::fs::write(&path, pad_record()).expect("pad file");
+        path
+    }
+
+    fn ready_file(&self) -> PathBuf {
+        self.0.join("ready")
+    }
+}
+
+impl Drop for Workdir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 struct Server {
     child: Child,
+}
+
+impl Server {
+    fn spawn(pad_file: &Path, port: u16, ready_file: Option<&Path>) -> Self {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_vulcan-dsud"));
+        command
+            .arg("--pad-file")
+            .arg(pad_file)
+            .arg("--port")
+            .arg(port.to_string())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+        if let Some(path) = ready_file {
+            command.arg("--ready-file").arg(path);
+        }
+        Self {
+            child: command.spawn().expect("spawn server"),
+        }
+    }
+
+    fn wait(&mut self, timeout: Duration) -> ExitStatus {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(status) = self.child.try_wait().expect("wait for the server") {
+                return status;
+            }
+            assert!(Instant::now() < deadline, "server did not exit in time");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn stderr(&mut self) -> String {
+        let mut text = String::new();
+        self.child
+            .stderr
+            .take()
+            .expect("captured stderr")
+            .read_to_string(&mut text)
+            .expect("read stderr");
+        text
+    }
 }
 
 impl Drop for Server {
@@ -39,27 +109,17 @@ impl Drop for Server {
     }
 }
 
+fn free_port() -> u16 {
+    let probe = UdpSocket::bind("127.0.0.1:0").expect("probe socket");
+    probe.local_addr().expect("probe address").port()
+}
+
 #[test]
 fn pushes_samples_after_one_request() {
-    let workdir = std::env::temp_dir().join(format!("vulcan-dsud-push-{}", std::process::id()));
-    std::fs::create_dir_all(&workdir).expect("workdir");
-    let pad_file = workdir.join("gamepad.bin");
-    std::fs::write(&pad_file, pad_record()).expect("pad file");
-
-    let probe = UdpSocket::bind("127.0.0.1:0").expect("probe socket");
-    let port = probe.local_addr().expect("probe address").port();
-    drop(probe);
-
-    let child = Command::new(env!("CARGO_BIN_EXE_vulcan-dsud"))
-        .arg("--pad-file")
-        .arg(&pad_file)
-        .arg("--port")
-        .arg(port.to_string())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn server");
-    let _server = Server { child };
+    let workdir = Workdir::new("push");
+    let pad_file = workdir.pad_file();
+    let port = free_port();
+    let _server = Server::spawn(&pad_file, port, None);
 
     let client = UdpSocket::bind("127.0.0.1:0").expect("client socket");
     client
@@ -112,5 +172,26 @@ fn pushes_samples_after_one_request() {
     assert!(
         last_counter.unwrap() > first_counter.unwrap(),
         "counter must advance between samples"
+    );
+}
+
+#[test]
+fn fails_when_the_endpoint_is_taken() {
+    let workdir = Workdir::new("taken");
+    let pad_file = workdir.pad_file();
+    let ready_file = workdir.ready_file();
+    // Holding the socket keeps the endpoint away from the server.
+    let _owner = UdpSocket::bind("127.0.0.1:0").expect("occupy the endpoint");
+    let port = _owner.local_addr().expect("occupied address").port();
+
+    let mut server = Server::spawn(&pad_file, port, Some(&ready_file));
+    let status = server.wait(Duration::from_secs(5));
+
+    assert!(!status.success(), "server must fail when the port is taken");
+    assert!(!ready_file.exists(), "server must not signal readiness");
+    let stderr = server.stderr();
+    assert!(
+        stderr.contains("cannot bind") && stderr.contains(&port.to_string()),
+        "reports the endpoint: {stderr}"
     );
 }
