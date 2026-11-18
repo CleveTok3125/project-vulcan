@@ -79,7 +79,7 @@ fi
 # The OBS plugin binds an abstract unix socket, which a session network
 # namespace cannot reach. The session side of the relay takes that name and
 # forwards each connection to the capture service on the host.
-if [ "${SESSION_NETWORK:-host}" = "netns" ] && [ "${OBS_VKCAPTURE:-1}" = "1" ]; then
+if [ "${OBS_VKCAPTURE:-1}" = "1" ]; then
     if [ -x /usr/local/bin/vulcan-capture-bridge ]; then
         env -u LD_PRELOAD /usr/local/bin/vulcan-capture-bridge game \
             --socket "${VULCAN_CAPTURE_SOCKET:-/run/vulcan-audio/capture.sock}" \

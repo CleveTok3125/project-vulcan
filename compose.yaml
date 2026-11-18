@@ -17,9 +17,9 @@ services:
     pull_policy: never
     container_name: "vulcan-${SESSION_ID}"
     init: true
-    # Networking comes from the preset: SESSION_NETWORK=netns publishes the
-    # Apollo ports from .generated/compose.netns.yaml and keeps the session
-    # loopback private; SESSION_NETWORK=host uses compose.host.yaml instead.
+    # The session has its own network namespace: the preset publishes the
+    # Apollo ports from .generated/compose.netns.yaml and loopback stays
+    # private.
     read_only: true
     # Do not start automatically after a host reboot.
     restart: "no"
@@ -67,7 +67,6 @@ services:
 
     environment:
       SESSION_ID: "${SESSION_ID:?set SESSION_ID in the selected env file}"
-      SESSION_NETWORK: "${SESSION_NETWORK:-netns}"
       GAMES_CATALOG_PATH: "/config/games/games.json"
       GAME_WIDTH: "${GAME_WIDTH:-1920}"
       GAME_HEIGHT: "${GAME_HEIGHT:-1080}"
@@ -125,13 +124,11 @@ services:
   # Host side of the capture relay. A session with its own network namespace
   # cannot reach the abstract unix socket the OBS plugin binds, so the session
   # forwards connections here and this service hands them to the plugin. It
-  # shares the host namespace and the session runtime directory; the profile
-  # keeps it out of host-networked sessions.
+  # shares the host namespace and the session runtime directory.
   capture:
     image: "vulcan/game-stream:${IMAGE_TAG:-local}"
     pull_policy: never
     container_name: "vulcan-${SESSION_ID}-capture"
-    profiles: ["netns"]
     network_mode: host
     read_only: true
     restart: "no"

@@ -20,7 +20,7 @@ Docker (rootful)
    ├─ PipeWire (Apollo audio sink)
    ├─ vulcan-inputd (socket -> gamescope EIS)
    ├─ vulcan-dsud (pad state -> Cemuhook UDP)
-   └─ vulcan-capture-bridge (vkcapture relay in netns)
+   └─ vulcan-capture-bridge (vkcapture relay)
 ```
 
 The container receives the render node named by `RENDER_NODE`. On NVIDIA,
@@ -354,11 +354,9 @@ The server address and port come from the `udp_input_servers` entry in
 `qt-config.ini`; the default `127.0.0.1:26760` matches the server. Without a
 connected pad the gamepad server reports a centered, buttonless pad, so the
 emulator never sees a deflected stick. The endpoint is exclusive: the launcher
-refuses to start the emulator when another process owns it. The default
-`SESSION_NETWORK=netns` keeps the port private to the session. In
-`SESSION_NETWORK=host`, a second concurrent Eden session sets
-`VULCAN_DSUD_PORT` and uses the same port in `udp_input_servers`, because the
-host namespace is shared.
+refuses to start the emulator when another process owns it. The session
+network namespace keeps the port private, so concurrent Eden sessions can use
+the same default.
 
 Eden generates the device identifier itself, so the mapping stays out of the
 catalog.
@@ -505,23 +503,17 @@ example uses `48006`; a second session on `48040` does not overlap it. Run
 derived table for those presets. Clients that only use the default port cannot
 reach a preset with a custom base port.
 
-`SESSION_NETWORK` selects how the session reaches those ports:
+The session gets its own network namespace and publishes those ports from
+`.generated/compose.netns.yaml`. Loopback stays inside the session, so the
+gamepad server and Wine services are isolated between sessions. The client
+still uses the host address and the same port numbers. OBS capture runs
+through the capture relay. LAN broadcast discovery stays on the host and does
+not reach the session.
 
-- `netns` is the default. The session gets its own network namespace and
-  publishes the ports from `.generated/compose.netns.yaml`. Loopback stays
-  inside the session, so the gamepad server and Wine services are isolated
-  between sessions. The client still uses the host address and the same port
-  numbers. OBS capture keeps working through the capture relay, and LAN
-  broadcast discovery stays on the host and does not reach the session.
-- `host` shares the host network namespace. Apollo binds the ports directly and
-  the OBS capture sender reaches the host plugin over its abstract unix socket,
-  at the cost of loopback isolation between sessions.
-
-A session namespace has no IPv6 address on its bridge interface, so Apollo
-binds IPv4 inside it (`address_family = ipv4`). Clients can still reach the
-session over IPv6 through the published ports; the Docker userland proxy
-forwards to the container's IPv4 listener. With host networking, Apollo
-listens on both families. `APOLLO_ADDRESS_FAMILY` overrides the rendered
+The namespace has no IPv6 address on its bridge interface, so Apollo binds
+IPv4 inside it (`address_family = ipv4`). Clients can still reach the session
+over IPv6 through the published ports; the Docker userland proxy forwards to
+the container's IPv4 listener. `APOLLO_ADDRESS_FAMILY` overrides the rendered
 value.
 
 Both sessions share one GPU, so VRAM and memory bandwidth apply to the sum of
@@ -720,9 +712,8 @@ client connection and falls back to shared memory. The sample preset leaves
 both unset; the tested session uses GLES2 without the software fallback.
 
 Sway does not start Xwayland while gamescope is enabled: gamescope runs its
-own X server for Wine. In `SESSION_NETWORK=host` Sway's instance would also
-compete for the abstract X11 socket names that the host owns.
-`GAMESCOPE_ENABLED=0` re-enables Xwayland for the direct Sway path.
+own X server for Wine. `GAMESCOPE_ENABLED=0` re-enables Xwayland for the
+direct Sway path.
 
 ### OBS capture
 
@@ -735,21 +726,18 @@ host:      OBS -> linux-vkcapture plugin -> DMA-BUF
 ```
 
 The sender and the plugin meet on an abstract unix socket, which the kernel
-scopes to the network namespace. The default `SESSION_NETWORK=netns` runs
-`vulcan-capture-bridge`: the session side binds the sender's abstract name and
-forwards each connection over a sequpacket socket in the session runtime
-directory, and the `capture` service shares the host namespace and hands the
-connection to the plugin. `SESSION_NETWORK=host` skips the relay and reaches
-the plugin directly. Frames keep their dmabuf
-descriptors, so the plugin imports the same buffers as with a direct
-connection.
+scopes to the network namespace. The session runs `vulcan-capture-bridge`: the
+session side binds the sender's abstract name and forwards each connection
+over a sequpacket socket in the session runtime directory, and the `capture`
+service shares the host namespace and hands the connection to the plugin.
+Frames keep their dmabuf descriptors, so the plugin imports the same buffers
+as with a direct connection.
 
 The relay frames the sender stream with the fixed message sizes of the pinned
 `OBS_VKCAPTURE_REF`. The image build fails when those sizes change, so the host
-plugin must use the same reference. The `capture` service exists only in
-`netns` mode and runs as the game user. `VULCAN_CAPTURE_SOCKET` moves the relay
-socket; both sides share the session runtime directory. This does not change
-the Sway/Apollo path.
+plugin must use the same reference. The `capture` service runs as the game
+user. `VULCAN_CAPTURE_SOCKET` moves the relay socket; both sides share the
+session runtime directory. This does not change the Sway/Apollo path.
 
 `OBS_VKCAPTURE=1` is the default. The capture source name defaults to
 `<SESSION_ID>-<GAME_ID>`, so two sessions running the same executable remain
@@ -1041,12 +1029,10 @@ discovered path.
 No input device is created in the host kernel, so neither session can see or
 grab the other's devices.
 
-The default `SESSION_NETWORK=netns` gives the session its own network
-namespace and publishes only the Apollo ports, so loopback endpoints such as
-the gamepad server are private to the session. OBS capture still works: the
-session relays the sender connection to the `capture` service in the host
-namespace. `SESSION_NETWORK=host` shares the host namespace instead, which
-makes those endpoints reachable from every session.
+The session has its own network namespace and publishes only the Apollo
+ports, so loopback endpoints such as the gamepad server are private to the
+session. OBS capture still works: the session relays the sender connection to
+the `capture` service in the host namespace.
 
 ## Logs
 
@@ -1060,9 +1046,8 @@ docker compose --env-file .env.local exec game tail -f /data/log/vulcan-capture-
 
 Apollo writes its own log to `/data/apollo/sunshine.log`. `session-start.log`
 holds the session startup and Apollo console output; `sway.log` holds Sway only.
-`vulcan-capture-bridge.log` exists in `netns` sessions and records relay
-connections; the host half of the relay logs to
-`docker logs vulcan-<SESSION_ID>-capture`.
+`vulcan-capture-bridge.log` records relay connections; the host half of the
+relay logs to `docker logs vulcan-<SESSION_ID>-capture`.
 `APOLLO_LOG_LEVEL` defaults to `2` (info); `0` and `1` enable verbose/debug
 logging and grow quickly during streaming.
 
@@ -1200,9 +1185,8 @@ Additional hardening:
 - Native entries have no rumble. Eden reads pads from the gamepad server, and
   its DSU client has no rumble message; the XInput proxy that forwards rumble
   only exists inside a Wine prefix.
-- The gamepad server listens on loopback. `SESSION_NETWORK=host` shares that
-  namespace between sessions, so concurrent Eden sessions then need distinct
-  `VULCAN_DSUD_PORT` values; the default `netns` isolates the endpoint.
+- The gamepad server listens on loopback inside the session namespace, so
+  concurrent Eden sessions keep the same default port.
 - A native entry needs `prod.keys` and firmware in its session volume, and its
   controller mapping is created once per volume through the setup app.
 - OBS audio is an opt-in host tunnel. The source exists only while the Apollo

@@ -221,11 +221,11 @@ check 'custom capture name is preserved' 'custom-name' \
 run_launch test OBS_VKCAPTURE=0 2>"$workdir/no-capture.log"
 check 'game capture can be disabled' '0' "$(grep -c '^gamecapture:' "$capture_log")"
 
-# A session network namespace keeps the sender; the relay in the session start
-# script carries it to the host plugin.
+# The launcher keeps the capture sender; the relay in the session start script
+# carries it to the host plugin.
 : >"$capture_log"
-run_launch test SESSION_NETWORK=netns 2>"$workdir/netns-capture.log"
-check 'netns session keeps the capture sender' '1' "$(grep -c '^gamecapture:' "$capture_log")"
+run_launch test 2>"$workdir/session-capture.log"
+check 'session keeps the capture sender' '1' "$(grep -c '^gamecapture:' "$capture_log")"
 
 # With gamescope, the wrapper stays inside the gamescope command line.
 : >"$capture_log"

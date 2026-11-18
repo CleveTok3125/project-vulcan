@@ -33,19 +33,14 @@ sway_xwayland() {
 # apollo_address_family prints the address family Apollo binds with.
 #
 # A session network namespace has no IPv6 address on its bridge interface, and
-# Apollo's dual-stack control server fails there, so it binds IPv4 inside the
-# namespace. Host networking keeps dual-stack listeners.
+# Apollo's dual-stack control server fails there, so it binds IPv4.
 apollo_address_family() {
-    local requested="${1:-}" network="${2:-netns}"
+    local requested="${1:-}"
     if [ -n "$requested" ]; then
         printf '%s\n' "$requested"
         return 0
     fi
-    if [ "$network" = "netns" ]; then
-        printf 'ipv4\n'
-    else
-        printf 'both\n'
-    fi
+    printf 'ipv4\n'
 }
 
 # render_apollo_apps_multi writes the Apollo app list for every catalog game.

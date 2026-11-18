@@ -66,10 +66,8 @@ check 'xwayland is off with gamescope' 'disable' "$(sway_xwayland 1)"
 check 'xwayland is on without gamescope' 'enable' "$(sway_xwayland 0)"
 check 'xwayland defaults to off' 'disable' "$(sway_xwayland)"
 
-check 'session namespace binds ipv4' 'ipv4' "$(apollo_address_family '' netns)"
-check 'host networking keeps both families' 'both' "$(apollo_address_family '' host)"
-check 'netns is the default mode' 'ipv4' "$(apollo_address_family)"
-check 'an explicit family wins' 'both' "$(apollo_address_family both netns)"
+check 'session namespace binds ipv4' 'ipv4' "$(apollo_address_family)"
+check 'an explicit family wins' 'both' "$(apollo_address_family both)"
 
 if [ "$(derive_app_uuid alpha)" = "$(derive_app_uuid demo)" ]; then
     printf 'FAIL uuid differs per game id\n' >&2

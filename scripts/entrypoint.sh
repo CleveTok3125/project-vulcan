@@ -186,7 +186,7 @@ sed \
     -e "s|@ADAPTER@|${APOLLO_ADAPTER}|g" \
     -e "s|@OUTPUT@|${APOLLO_OUTPUT}|g" \
     -e "s|@LOG_LEVEL@|${APOLLO_LOG_LEVEL:-2}|g" \
-    -e "s|@ADDRESS_FAMILY@|$(apollo_address_family "${APOLLO_ADDRESS_FAMILY:-}" "${SESSION_NETWORK:-netns}")|g" \
+    -e "s|@ADDRESS_FAMILY@|$(apollo_address_family "${APOLLO_ADDRESS_FAMILY:-}")|g" \
     /config/apollo/sunshine.conf.in >/data/apollo/sunshine.conf
 
 SWAY_XWAYLAND="$(sway_xwayland "${GAMESCOPE_ENABLED:-1}")"

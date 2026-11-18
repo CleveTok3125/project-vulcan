@@ -40,9 +40,6 @@ MIRROR_COUNTRY ?=
 OBS_VKCAPTURE_REF ?= v1.5.6
 EDEN_VERSION ?= 0.2.1
 EDEN_SHA256 ?= 2fae658397daf13c118082a3eb65d61a6519967b5e22e6667756baecf6000c5a
-# netns gives the session its own network namespace and publishes the Apollo
-# ports (default); host shares the host network namespace instead.
-SESSION_NETWORK ?= netns
 GAMES_CATALOG ?= games.yaml
 AUDIO_RUNTIME_DIR ?= $(if $(XDG_RUNTIME_DIR),$(XDG_RUNTIME_DIR),/run/user/$(shell id -u))/vulcan/$(SESSION_ID)
 AUDIO_LATENCY_MSEC ?= 60
@@ -82,11 +79,9 @@ export IMAGE_TAG
 # node from the base compose file only.
 COMPOSE_NVIDIA := $(if $(filter nvidia,$(GPU_VENDOR)),-f compose.nvidia.yaml,)
 COMPOSE_DATA := $(if $(strip $(VULCAN_DATA_DIR)),-f compose.data.yaml,)
-COMPOSE_NETWORK := $(if $(filter netns,$(SESSION_NETWORK)),-f $(NETNS_COMPOSE),-f compose.host.yaml)
-# The capture relay only exists in netns mode; the profile keeps it out of
-# host-networked sessions, where the sender reaches the plugin directly.
-COMPOSE_PROFILE := $(if $(filter netns,$(SESSION_NETWORK)),--profile netns,)
-COMPOSE = AUDIO_RUNTIME_DIR="$(AUDIO_RUNTIME_DIR)" SESSION_NETWORK="$(SESSION_NETWORK)" docker compose $(COMPOSE_PROFILE) --env-file $(P_SINGLE) -f compose.yaml $(COMPOSE_NETWORK) $(COMPOSE_NVIDIA) $(COMPOSE_DATA) -f $(GAMES_COMPOSE)
+# The session runs in its own network namespace, publishes the Apollo ports
+# from the generated override, and runs the capture relay next to it.
+COMPOSE = AUDIO_RUNTIME_DIR="$(AUDIO_RUNTIME_DIR)" docker compose --env-file $(P_SINGLE) -f compose.yaml -f $(NETNS_COMPOSE) $(COMPOSE_NVIDIA) $(COMPOSE_DATA) -f $(GAMES_COMPOSE)
 CONTAINER := vulcan-$(SESSION_ID)
 VOLUME := vulcan_$(SESSION_ID)-data
 UNINSTALL_VOLUME = $(if $(strip $(VULCAN_DATA_DIR)),$(COMPOSE) down,$(COMPOSE) down -v)
@@ -449,9 +444,7 @@ _check-presets:
 _games-config:
 ifeq ($(P_COUNT),1)
 	@YQ="$(YQ)" scripts/generate-games-config.sh "$(GAMES_CATALOG)" "$(GAMES_OUTPUT_DIR)"
-ifeq ($(SESSION_NETWORK),netns)
 	@scripts/generate-netns-config.sh "$(P_SINGLE)" "$(NETNS_COMPOSE)"
-endif
 else
 	@:
 endif

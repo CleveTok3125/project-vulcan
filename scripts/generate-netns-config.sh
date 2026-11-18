@@ -35,7 +35,7 @@ tmp="$output.$$"
 trap 'rm -f "$tmp"' EXIT
 
 {
-    printf '# Generated from %s; selected by SESSION_NETWORK=netns.\n' "$preset"
+    printf '# Generated from %s; publishes the Apollo ports for the session namespace.\n' "$preset"
     printf 'services:\n  game:\n    ports:\n'
     while read -r protocol port; do
         printf '      - "%d:%d/%s"\n' "$port" "$port" "$protocol"

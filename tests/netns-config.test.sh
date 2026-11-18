@@ -1,6 +1,6 @@
 #!/bin/bash
-# Verifies that SESSION_NETWORK selects the host namespace or the published
-# Apollo ports, and that the published set follows APOLLO_PORT.
+# Verifies that the generated override publishes the Apollo ports for a
+# session and that the published set follows APOLLO_PORT.
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -29,16 +29,6 @@ check_contains() {
     fi
 }
 
-check_missing() {
-    local label="$1" needle="$2" haystack="$3"
-    if grep -Fq -- "$needle" <<<"$haystack"; then
-        printf 'FAIL %s: unexpected [%s]\n' "$label" "$needle" >&2
-        failures=$((failures + 1))
-    else
-        printf 'ok   %s\n' "$label"
-    fi
-}
-
 mkdir -p "$workdir/source"
 cat >"$workdir/preset.env" <<EOF
 SESSION_ID=demo
@@ -49,7 +39,6 @@ SPRITZ_DIR=$workdir/source
 APOLLO_PORT=48006
 GID_RENDER=1000
 GID_VIDEO=1000
-SESSION_NETWORK=netns
 EOF
 
 netns_override="$workdir/compose.netns.yaml"
@@ -87,9 +76,6 @@ else
 fi
 check 'missing preset is reported' '1' "$(grep -c 'missing preset' "$workdir/missing.log")"
 
-check_contains 'container mode defaults to netns' \
-    '${SESSION_NETWORK:-netns}' "$(cat "$repo_root/compose.yaml")"
-
 if ! docker compose version >/dev/null 2>&1; then
     printf 'skip compose render: docker compose is not available\n'
 else
@@ -98,24 +84,13 @@ else
             -f "$repo_root/compose.yaml" "$@" config 2>/dev/null
     }
 
-    host_config="$(render -f "$repo_root/compose.host.yaml")"
-    check_contains 'host mode shares the host namespace' 'network_mode: host' "$host_config"
-    check_missing 'host mode publishes nothing' 'published:' "$host_config"
-
     netns_config="$(render -f "$netns_override")"
-    check_missing 'netns mode drops the host namespace' 'network_mode: host' "$netns_config"
-    check 'netns mode publishes the whole set' '8' \
+    check 'session publishes the whole set' '8' \
         "$(printf '%s\n' "$netns_config" | grep -c 'published:')"
-    check_contains 'netns mode publishes the web port' 'published: "48007"' "$netns_config"
-    check_contains 'netns mode keeps the session network' 'name: vulcan-demo_default' "$netns_config"
-    check_missing 'netns mode leaves the relay out without the profile' \
-        'vulcan-capture-bridge' "$netns_config"
-
-    netns_profile="$(BASE_IMAGE=vulcan/base:test docker compose --profile netns \
-        --env-file "$workdir/preset.env" -f "$repo_root/compose.yaml" \
-        -f "$netns_override" config 2>/dev/null)"
-    check_contains 'netns profile adds the capture relay' 'vulcan-capture-bridge' "$netns_profile"
-    check_contains 'capture relay has its own container' 'vulcan-demo-capture' "$netns_profile"
+    check_contains 'session publishes the web port' 'published: "48007"' "$netns_config"
+    check_contains 'session keeps its own network' 'name: vulcan-demo_default' "$netns_config"
+    check_contains 'session runs the capture relay' 'vulcan-capture-bridge' "$netns_config"
+    check_contains 'capture relay has its own container' 'vulcan-demo-capture' "$netns_config"
 fi
 
 if [ "$failures" -ne 0 ]; then

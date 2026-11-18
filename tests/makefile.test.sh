@@ -82,22 +82,12 @@ check_missing 'amd preset skips the nvidia override' 'compose.nvidia.yaml' "$out
 out="$(run_make up P=intel.env)"
 check_missing 'intel preset skips the nvidia override' 'compose.nvidia.yaml' "$out"
 
-# The default network mode isolates the session; host is the opt-in mode.
+# The session always runs in its own network namespace and publishes the
+# Apollo ports from the generated override.
 out="$(run_make up)"
-check_contains 'default mode publishes the apollo ports' 'compose.netns.yaml' "$out"
-check_missing 'default mode skips the host override' 'compose.host.yaml' "$out"
-check_contains 'default mode enables the capture profile' '--profile netns' "$out"
-check_contains 'default mode reaches the container' 'SESSION_NETWORK="netns"' "$out"
-out="$(run_make up SESSION_NETWORK=host)"
-check_contains 'host mode adds the host override' 'compose.host.yaml' "$out"
-check_missing 'host mode publishes no ports' 'compose.netns.yaml' "$out"
-check_missing 'host mode leaves the capture profile off' '--profile netns' "$out"
-check_contains 'host mode reaches the container' 'SESSION_NETWORK="host"' "$out"
-printf 'SESSION_ID=demo\nGAMES_CATALOG=games.yaml\nSESSION_NETWORK=host\n' \
-    >"$workdir/host.env"
-out="$(run_make up P=host.env)"
-check_contains 'preset network mode is honored' 'compose.host.yaml' "$out"
-check_missing 'preset network mode skips the ports override' 'compose.netns.yaml' "$out"
+check_contains 'session publishes the apollo ports' 'compose.netns.yaml' "$out"
+check_missing 'session has no host override' 'compose.host.yaml' "$out"
+check_missing 'network mode variable is gone' 'SESSION_NETWORK=' "$out"
 
 # A pinned base image keys the game image tag and is never rebuilt.
 default_tag="$(cd "$workdir" && make --no-print-directory --eval='print-tag: ; @echo $(IMAGE)' print-tag)"
