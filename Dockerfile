@@ -37,6 +37,8 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
 FROM build-tools AS apollo-builder
 
 ARG APOLLO_PKG=apollo-git
+# This commit is upstream master and does not build against OpenSSL 4; keep the
+# base image on OpenSSL 3 or patch src/crypto.cpp. See "Reproducible builds".
 ARG APOLLO_COMMIT=adc5c5a0bd80831ce495434bb16aee2cd4175fb8
 
 # AUR packages cannot be built by root.

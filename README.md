@@ -123,8 +123,9 @@ from it and adds only the vendor packages when applicable, Apollo, the native
 and Rust artifacts, the obs-vkcapture sender, and the configuration.
 
 The base tag hashes `docker/base.Dockerfile`, `docker/fetch-heavy`, and
-`MIRROR_COUNTRY`; the game tag hashes the base tag, `GPU_VENDOR`, `APOLLO_PKG`,
-`APOLLO_COMMIT`, `OBS_VKCAPTURE_REF`, `EDEN_VERSION`, and `EDEN_SHA256`.
+`MIRROR_COUNTRY`; the game tag hashes the base image reference and its tag,
+`GPU_VENDOR`, `APOLLO_PKG`, `APOLLO_COMMIT`, `OBS_VKCAPTURE_REF`,
+`EDEN_VERSION`, and `EDEN_SHA256`.
 Editing scripts or config rebuilds the last layers only, an Apollo bump
 rebuilds the Apollo stage only, and a package change rebuilds the base and
 everything above it. `uninstall` removes the game image once no container
@@ -153,17 +154,55 @@ The build pins its external inputs:
 - Rust crates are pinned by `rust/Cargo.lock` and built with `--locked`.
 - The Eden AppImage is pinned by `EDEN_VERSION` and `EDEN_SHA256`.
 
-The image tag follows the build inputs: the base tag, `GPU_VENDOR`,
-`APOLLO_PKG`, `APOLLO_COMMIT`, `OBS_VKCAPTURE_REF`, `EDEN_VERSION`, and
-`EDEN_SHA256` are hashed into
-`vulcan/game-stream:local-<hash>`. Presets with the same inputs share one
+The image tag follows the build inputs, hashed into
+`vulcan/game-stream:local-<hash>`: the base image reference and its tag,
+`GPU_VENDOR`, `APOLLO_PKG`, `APOLLO_COMMIT`, `OBS_VKCAPTURE_REF`,
+`EDEN_VERSION`, and `EDEN_SHA256`. Presets with the same inputs share one
 image; a preset that changes them builds its own tag instead of overwriting
 the image another preset runs on. `up` never pulls, so it stops with an error
 when that variant has not been built.
 
-CachyOS repositories do not expose an archive snapshot, so packages are
-resolved from the CachyOS repos at build time. The pinned base digest is the
-strongest available pin for those packages.
+CachyOS repositories do not expose dated repository databases, so packages
+are resolved from the current CachyOS repos at build time. The package archive
+carries package files for the `cachyos` repository only, without the
+`cachyos-core-v3` and `cachyos-extra-v3` databases, so `pacman` cannot resolve
+a pinned package set. The pinned base digest is the strongest pin for the
+starting filesystem; it does not pin the packages installed during the build.
+
+A base image built once can be exported and loaded on another host, or pushed
+to a registry and referenced there, to freeze the package set across hosts.
+`BASE_IMAGE` accepts a digest or an image ID.
+
+```bash
+make base
+make base-export                            # .generated/vulcan-base.tar
+make base-export BASE_EXPORT=base.tar.zst   # .gz and .zstd work too
+# on another host:
+docker load -i <base tarball>
+BASE_IMAGE=sha256:<image id> make build     # id is printed by base-export
+```
+
+For a registry, push the image and use the digest from the push output:
+
+```bash
+docker push vulcan/base:<tag>
+BASE_IMAGE=vulcan/base@sha256:<digest> make build
+```
+
+With a pinned base, `make base` only checks that the image is present and
+`make base-rebuild` refuses to run; the game image tag includes the pinned
+reference, so a different base always builds its own tag. Without a pinned
+base, a fresh base follows the rolling repositories.
+
+Apollo also caps a fresh base build. `apollo-git` at the pinned commit does not
+compile against OpenSSL 4: its `src/crypto.cpp` reads `ASN1_BIT_STRING` fields
+directly and passes a `const X509_NAME *` where OpenSSL 4 requires the
+accessors and a writable name. Rebuilding `vulcan/base` after the repositories
+move to OpenSSL 4 fails the game image with `invalid use of incomplete type
+'const ASN1_BIT_STRING'`. The pinned commit is current upstream master, so
+there is no newer commit to bump to. Keep the base image built against
+OpenSSL 3.x, or carry a `src/crypto.cpp` patch in the `apollo-builder` stage
+until Apollo supports the newer headers.
 
 Update the pinned inputs together when intentionally upgrading the image.
 

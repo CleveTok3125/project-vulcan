@@ -62,13 +62,19 @@ BASE_DOCKERFILE := docker/base.Dockerfile
 BASE_INPUTS := $(BASE_DOCKERFILE) docker/fetch-heavy
 BASE_HASH := $(shell cat $(BASE_INPUTS) | sha256sum | cut -c1-12)
 BASE_TAG := local-$(shell printf '%s|%s' "$(MIRROR_COUNTRY)" "$(BASE_HASH)" | sha256sum | cut -c1-12)
-BASE_IMAGE := vulcan/base:$(BASE_TAG)
+# A digest or image ID freezes the package set across hosts; it is used as-is
+# and never rebuilt. See "Reproducible builds" in README.md.
+BASE_IMAGE ?= vulcan/base:$(BASE_TAG)
 export BASE_IMAGE
+
+# is_pinned_base reports whether BASE_IMAGE names a fixed image instead of a
+# tag this Makefile builds.
+is_pinned_base = $(if $(filter sha256:%,$(BASE_IMAGE)),1,$(if $(findstring @sha256:,$(BASE_IMAGE)),1,))
 export EDEN_VERSION EDEN_SHA256
 
 # One image per build variant, so a preset never overwrites the image another
 # preset runs on.
-IMAGE_TAG := local-$(shell printf '%s' '$(BASE_TAG)|$(GPU_VENDOR)|$(APOLLO_PKG)|$(APOLLO_COMMIT)|$(OBS_VKCAPTURE_REF)|$(EDEN_VERSION)|$(EDEN_SHA256)' | sha256sum | cut -c1-12)
+IMAGE_TAG := local-$(shell printf '%s' '$(BASE_IMAGE)|$(BASE_TAG)|$(GPU_VENDOR)|$(APOLLO_PKG)|$(APOLLO_COMMIT)|$(OBS_VKCAPTURE_REF)|$(EDEN_VERSION)|$(EDEN_SHA256)' | sha256sum | cut -c1-12)
 IMAGE := vulcan/game-stream:$(IMAGE_TAG)
 export IMAGE_TAG
 
@@ -119,7 +125,7 @@ endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help base base-rebuild rm-base images volume volumes _volume-name build up rebuild _recreate stop down restart logs ps up-all down-all stop-all restart-all ps-all build-all stats-all uninstall-all check-ports check-xinput check-rust ports _check-presets _check-ports _games-config _audio-runtime _data-runtime audio-up audio-down audio-status config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
+.PHONY: help base base-rebuild base-export rm-base images volume volumes _volume-name build up rebuild _recreate stop down restart logs ps up-all down-all stop-all restart-all ps-all build-all stats-all uninstall-all check-ports check-xinput check-rust ports _check-presets _check-ports _games-config _audio-runtime _data-runtime audio-up audio-down audio-status config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
 
 # The table keeps the file order of the targets inside each section. A `# ---`
 # line between blocks starts a new group, which the table separates with a blank
@@ -150,17 +156,52 @@ help: ## [global] Show available targets
 
 # ---
 base: ## [global] Build the shared environment image for this host
+ifeq ($(is_pinned_base),1)
+	@docker image inspect "$(BASE_IMAGE)" >/dev/null 2>&1 || { \
+		printf '[vulcan] pinned base image is missing: %s\n' "$(BASE_IMAGE)" >&2; \
+		printf '[vulcan] pull or load it, or unset BASE_IMAGE to build the base\n' >&2; \
+		exit 1; \
+	}
+else
 	@docker image inspect $(BASE_IMAGE) >/dev/null 2>&1 || \
 		docker build -f $(BASE_DOCKERFILE) \
 			--build-arg MIRROR_COUNTRY="$(MIRROR_COUNTRY)" \
 			-t $(BASE_IMAGE) .
+endif
 
 base-rebuild: ## [global] Rebuild the shared base image without cache
+ifeq ($(is_pinned_base),1)
+	@printf '[vulcan] BASE_IMAGE is pinned (%s); unset it to rebuild the base\n' "$(BASE_IMAGE)" >&2
+	@exit 1
+else
 	@test "$(CONFIRM)" = "1" || { printf '%s\n' 'Refusing rebuild: run make base-rebuild CONFIRM=1'; exit 1; }
 	docker build --no-cache \
 		-f $(BASE_DOCKERFILE) \
 		--build-arg MIRROR_COUNTRY="$(MIRROR_COUNTRY)" \
 		-t $(BASE_IMAGE) .
+endif
+
+BASE_EXPORT ?= $(GAMES_OUTPUT_DIR)/vulcan-base.tar
+
+# The export keeps the image tags, so a loaded copy can be addressed by tag or
+# by the printed image id. Compression follows the file extension.
+base-export: ## [global] Export the base image as a tarball
+	@docker image inspect "$(BASE_IMAGE)" >/dev/null 2>&1 || { \
+		printf '[vulcan] base image not found: %s\n' "$(BASE_IMAGE)" >&2; \
+		printf '[vulcan] run make base first, or pin an existing image\n' >&2; \
+		exit 1; \
+	}
+	@install -d -m 0755 "$(dir $(BASE_EXPORT))"
+	@case "$(BASE_EXPORT)" in \
+		*.tar.zst|*.tar.zstd) set -o pipefail; docker save "$(BASE_IMAGE)" | zstd -q -T0 -o "$(BASE_EXPORT)" ;; \
+		*.tar.gz|*.tgz) set -o pipefail; docker save "$(BASE_IMAGE)" | gzip -c >"$(BASE_EXPORT)" ;; \
+		*) docker save -o "$(BASE_EXPORT)" "$(BASE_IMAGE)" ;; \
+	esac
+	@ls -lh "$(BASE_EXPORT)"
+	@docker image inspect "$(BASE_IMAGE)" --format 'image id: {{.Id}}'
+	@printf '%s\n' 'on the other host:'
+	@printf '  docker load -i %s\n' "$(BASE_EXPORT)"
+	@printf '  BASE_IMAGE=sha256:<image id> make build\n'
 
 rm-base: ## [global] Remove the base image
 	@images=$$(docker images --format '{{.Repository}}:{{.Tag}}' vulcan/base); \

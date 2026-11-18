@@ -99,6 +99,36 @@ out="$(run_make up P=host.env)"
 check_contains 'preset network mode is honored' 'compose.host.yaml' "$out"
 check_missing 'preset network mode skips the ports override' 'compose.netns.yaml' "$out"
 
+# A pinned base image keys the game image tag and is never rebuilt.
+default_tag="$(cd "$workdir" && make --no-print-directory --eval='print-tag: ; @echo $(IMAGE)' print-tag)"
+pinned_tag="$(cd "$workdir" && make --no-print-directory --eval='print-tag: ; @echo $(IMAGE)' print-tag BASE_IMAGE=sha256:abc)"
+if [ -n "$default_tag" ] && [ "$default_tag" != "$pinned_tag" ]; then
+    printf 'ok   a pinned base gets its own game image tag\n'
+else
+    printf 'FAIL a pinned base did not change the game image tag: [%s] vs [%s]\n' "$default_tag" "$pinned_tag" >&2
+    failures=$((failures + 1))
+fi
+
+out="$(cd "$workdir" && make --no-print-directory base \
+    BASE_IMAGE=vulcan/base@sha256:0000000000000000000000000000000000000000000000000000000000000000 2>&1 || true)"
+check_contains 'missing pinned base is reported' 'pinned base image is missing' "$out"
+check_contains 'missing pinned base suggests a fix' 'pull or load it' "$out"
+
+out="$(cd "$workdir" && make --no-print-directory base-rebuild CONFIRM=1 \
+    BASE_IMAGE=sha256:abc 2>&1 || true)"
+check_contains 'a pinned base is never rebuilt' 'unset it to rebuild the base' "$out"
+
+out="$(run_make base-export)"
+check_contains 'base export writes a tarball' 'docker save' "$out"
+check_contains 'base export defaults to a tarball path' '.generated/vulcan-base.tar' "$out"
+
+out="$(run_make base-export BASE_EXPORT=/tmp/vulcan-base.tar.zst)"
+check_contains 'base export compresses by extension' 'zstd' "$out"
+
+out="$(cd "$workdir" && make --no-print-directory base-export \
+    BASE_IMAGE=sha256:missing 2>&1 || true)"
+check_contains 'base export reports a missing image' 'base image not found' "$out"
+
 # A host data directory adds the storage override and changes teardown.
 out="$(run_make up P=data.env)"
 check_contains 'host data adds the storage override' 'compose.data.yaml' "$out"
