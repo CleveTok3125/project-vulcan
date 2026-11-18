@@ -3,18 +3,23 @@
 # Copy it and set source to the host directory that contains the executable:
 #   cp games.example.yaml games.yaml
 #
-# id:           path segment, unique within the session
+# id:           unique path segment; names the overlay, prefix, Apollo app,
+#               and log lines
 # name:         label shown in Apollo/Artemis
 # runner:       launcher kind, "wine" (default) or "eden"
-# source:       absolute host directory mounted read-only at /games-ro/<id>
-# exe:          executable path relative to source and /games/<id>; wine only
-# rom:          game image path relative to source; eden only
+# source:       absolute host directory mounted read-only at /games-ro/<id>;
+#               the overlay presents it at /games/<id>
+# exe:          executable path relative to source; wine only
+# rom:          game image path relative to source; eden only; quote a name
+#               that contains an apostrophe
 # reset_paths:  paths relative to source, cleared once per Wine prefix
-# wine_source:  optional absolute Wine tree mounted at /wine/<id>
+# wine_source:  optional absolute Wine tree mounted at /wine/<id>; overrides
+#               the session SPRITZ_DIR
 # uuid:         optional stable app UUID; empty derives one from id
-#
-# eden_content: optional absolute host directory mounted read-only at
-#               /eden-content as a source for updates and DLC
+# eden_content: optional session-wide absolute host directory mounted
+#               read-only at /eden-content for updates and DLC
+eden_content: /srv/eden/content
+
 games:
   - id: demo
     name: Demo Game
@@ -30,12 +35,8 @@ games:
       - Data/Login
       - Data/Cache
 
-# A native emulator entry runs the image from the read-only mount. Any
-# session with such an entry also gets an Eden Setup app, which opens the
-# emulator without a game to install keys, firmware, and updates:
-#
-#   - id: mario
-#     name: Super Mario 3D World
-#     runner: eden
-#     source: /srv/games/mario
-#     rom: game.xci
+  - id: native
+    name: Native Game
+    runner: eden
+    source: /srv/games/native
+    rom: game.xci

@@ -7,7 +7,51 @@ display. Apollo lists every catalog game as an app and starts the selected one.
 gamescope hosts the game as a fullscreen client. The host's graphical session
 is not used.
 
-## Architecture
+## Contents
+
+- [1. Architecture](#1-architecture)
+- [2. Host prerequisites](#2-host-prerequisites)
+  - [2.1 Groups](#21-groups)
+- [3. Build cache](#3-build-cache)
+  - [3.1 Shared base image](#31-shared-base-image)
+- [4. Reproducible builds](#4-reproducible-builds)
+- [5. Configuration](#5-configuration)
+  - [5.1 Game catalog](#51-game-catalog)
+  - [5.2 Eden entries](#52-eden-entries)
+    - [5.2.1 Enabling the gamepad](#521-enabling-the-gamepad)
+    - [5.2.2 Texture mods](#522-texture-mods)
+  - [5.3 Game directories and overlays](#53-game-directories-and-overlays)
+  - [5.4 Sessions](#54-sessions)
+  - [5.5 Session data location](#55-session-data-location)
+  - [5.6 Ports](#56-ports)
+- [6. Fresh deployment](#6-fresh-deployment)
+  - [6.1 NVIDIA devices](#61-nvidia-devices)
+  - [6.2 AMD and Intel](#62-amd-and-intel)
+- [7. Display and game](#7-display-and-game)
+  - [7.1 Sway and Xwayland](#71-sway-and-xwayland)
+  - [7.2 OBS capture](#72-obs-capture)
+  - [7.3 OBS audio](#73-obs-audio)
+    - [7.3.1 Audio from Apollo stream](#731-audio-from-apollo-stream)
+    - [7.3.2 Audio without Apollo](#732-audio-without-apollo)
+  - [7.4 Wine environment](#74-wine-environment)
+  - [7.5 GPU path](#75-gpu-path)
+- [8. Input](#8-input)
+  - [8.1 Cursor](#81-cursor)
+  - [8.2 Gamepad](#82-gamepad)
+  - [8.3 Multi-touch](#83-multi-touch)
+  - [8.4 Session isolation](#84-session-isolation)
+- [9. Logs](#9-logs)
+- [10. Maintenance](#10-maintenance)
+  - [10.1 Session cleanup](#101-session-cleanup)
+  - [10.2 Updating game files](#102-updating-game-files)
+    - [10.2.1 Stale overlay after a host update](#1021-stale-overlay-after-a-host-update)
+  - [10.3 Recreating a Wine prefix](#103-recreating-a-wine-prefix)
+  - [10.4 Migrating from per-game presets](#104-migrating-from-per-game-presets)
+- [11. Security](#11-security)
+- [12. Limitations](#12-limitations)
+- [13. Validation checklist](#13-validation-checklist)
+
+## 1. Architecture
 
 ```text
 Docker (rootful)
@@ -35,51 +79,7 @@ client and owns the game session inside the container.
 Hyprland is not used because its Aquamarine backend requires an active seat/VT,
 which is not available in this container.
 
-## Contents
-
-- [Architecture](#architecture)
-- [Host prerequisites](#host-prerequisites)
-  - [Groups](#groups)
-- [Build cache](#build-cache)
-  - [Shared base image](#shared-base-image)
-- [Reproducible builds](#reproducible-builds)
-- [Configuration](#configuration)
-  - [Game catalog](#game-catalog)
-  - [Eden entries](#eden-entries)
-    - [Enabling the gamepad](#enabling-the-gamepad)
-    - [Texture mods](#texture-mods)
-  - [Game directories and overlays](#game-directories-and-overlays)
-  - [Sessions](#sessions)
-  - [Session data location](#session-data-location)
-  - [Ports](#ports)
-- [Fresh deployment](#fresh-deployment)
-  - [NVIDIA devices](#nvidia-devices)
-  - [AMD and Intel](#amd-and-intel)
-- [Display and game](#display-and-game)
-  - [Sway and Xwayland](#sway-and-xwayland)
-  - [OBS capture](#obs-capture)
-  - [OBS audio](#obs-audio)
-    - [Audio from Apollo stream](#audio-from-apollo-stream)
-    - [Audio without Apollo](#audio-without-apollo)
-  - [Wine environment](#wine-environment)
-  - [GPU path](#gpu-path)
-- [Input](#input)
-  - [Cursor](#cursor)
-  - [Gamepad](#gamepad)
-  - [Multi-touch](#multi-touch)
-  - [Session isolation](#session-isolation)
-- [Logs](#logs)
-- [Maintenance](#maintenance)
-  - [Session cleanup](#session-cleanup)
-  - [Updating game files](#updating-game-files)
-    - [Stale overlay after a host update](#stale-overlay-after-a-host-update)
-  - [Recreating a Wine prefix](#recreating-a-wine-prefix)
-  - [Migrating from per-game presets](#migrating-from-per-game-presets)
-- [Security](#security)
-- [Limitations](#limitations)
-- [Validation checklist](#validation-checklist)
-
-## Host prerequisites
+## 2. Host prerequisites
 
 - Linux host with Docker Engine, rootful mode.
 - NVIDIA driver and NVIDIA Container Toolkit (`nvidia-container-toolkit`), or
@@ -100,13 +100,13 @@ which is not available in this container.
 - `WINE_ROOT` is the container path of that tree. It needs `bin/wine64` or,
   for Wine 11 and later, `bin/wine`.
 
-### Groups
+### 2.1 Groups
 
 `GID_RENDER` and `GID_VIDEO` are the render/video GIDs. `GID_STORAGE` is
 optional. Input devices are not passed to the container, so no input GID is
 needed.
 
-## Build cache
+## 3. Build cache
 
 The base image is pinned by digest and the package database/package cache are
 BuildKit cache mounts. Changing only `scripts/` or `config/` reuses the
@@ -115,7 +115,7 @@ package and Apollo build layers.
 The first build after a Dockerfile package-list change still downloads the new
 packages once. Do not use `--no-cache` for normal rebuilds.
 
-### Shared base image
+### 3.1 Shared base image
 
 `make base` builds `vulcan/base:<hash>` from `docker/base.Dockerfile`: the
 mirror setup, the runtime packages, and the game user. The game image starts
@@ -126,6 +126,7 @@ The base tag hashes `docker/base.Dockerfile`, `docker/fetch-heavy`, and
 `MIRROR_COUNTRY`; the game tag hashes the base image reference and its tag,
 `GPU_VENDOR`, `APOLLO_PKG`, `APOLLO_COMMIT`, `OBS_VKCAPTURE_REF`,
 `EDEN_VERSION`, and `EDEN_SHA256`.
+
 Editing scripts or config rebuilds the last layers only, an Apollo bump
 rebuilds the Apollo stage only, and a package change rebuilds the base and
 everything above it. `uninstall` removes the game image once no container
@@ -144,7 +145,7 @@ explicitly.
 `make images` lists the Vulcan images, and `make base-rebuild CONFIRM=1`
 rebuilds the base image without cache for when the upstream packages moved.
 
-## Reproducible builds
+## 4. Reproducible builds
 
 The build pins its external inputs:
 
@@ -157,17 +158,22 @@ The build pins its external inputs:
 The image tag follows the build inputs, hashed into
 `vulcan/game-stream:local-<hash>`: the base image reference and its tag,
 `GPU_VENDOR`, `APOLLO_PKG`, `APOLLO_COMMIT`, `OBS_VKCAPTURE_REF`,
-`EDEN_VERSION`, and `EDEN_SHA256`. Presets with the same inputs share one
-image; a preset that changes them builds its own tag instead of overwriting
-the image another preset runs on. `up` never pulls, so it stops with an error
-when that variant has not been built.
+`EDEN_VERSION`, and `EDEN_SHA256`.
+
+Presets with the same inputs share one image; a preset that changes them
+builds its own tag instead of overwriting the image another preset runs on.
+
+`up` never pulls, so it stops with an error when that variant has not been
+built.
 
 CachyOS repositories do not expose dated repository databases, so packages
-are resolved from the current CachyOS repos at build time. The package archive
-carries package files for the `cachyos` repository only, without the
-`cachyos-core-v3` and `cachyos-extra-v3` databases, so `pacman` cannot resolve
-a pinned package set. The pinned base digest is the strongest pin for the
-starting filesystem; it does not pin the packages installed during the build.
+are resolved from the current CachyOS repos at build time.
+
+The package archive carries package files for the `cachyos` repository only,
+without the `cachyos-core-v3` and `cachyos-extra-v3` databases, so `pacman`
+cannot resolve a pinned package set. The pinned base digest is the strongest
+pin for the starting filesystem; it does not pin the packages installed during
+the build.
 
 A base image built once can be exported and loaded on another host, or pushed
 to a registry and referenced there, to freeze the package set across hosts.
@@ -197,19 +203,24 @@ base, a fresh base follows the rolling repositories.
 Apollo also caps a fresh base build. `apollo-git` at the pinned commit does not
 compile against OpenSSL 4: its `src/crypto.cpp` reads `ASN1_BIT_STRING` fields
 directly and passes a `const X509_NAME *` where OpenSSL 4 requires the
-accessors and a writable name. Rebuilding `vulcan/base` after the repositories
-move to OpenSSL 4 fails the game image with `invalid use of incomplete type
-'const ASN1_BIT_STRING'`. The pinned commit is current upstream master, so
-there is no newer commit to bump to. Keep the base image built against
-OpenSSL 3.x, or carry a `src/crypto.cpp` patch in the `apollo-builder` stage
-until Apollo supports the newer headers.
+accessors and a writable name.
+
+Rebuilding `vulcan/base` after the repositories move to OpenSSL 4 fails the
+game image with `invalid use of incomplete type 'const ASN1_BIT_STRING'`. The
+pinned commit is current upstream master, so there is no newer commit to bump
+to.
+
+Keep the base image built against OpenSSL 3.x, or carry a `src/crypto.cpp`
+patch in the `apollo-builder` stage until Apollo supports the newer headers.
 
 Update the pinned inputs together when intentionally upgrading the image.
 
-## Configuration
+## 5. Configuration
 
-The `.env.multi.example` preset describes one session on one host, with the
-host-specific lines marked. `games.example.yaml` is the game catalog template.
+The example files are the configuration reference:
+[`.env.multi.example`](.env.multi.example) documents the required and optional
+variables; host-specific lines are marked.
+[`games.example.yaml`](games.example.yaml) documents the catalog fields.
 
 ```bash
 cp .env.multi.example .env.local
@@ -222,78 +233,27 @@ Both local files are ignored by git. `make` converts `games.yaml` to
 `.generated/games.json` and `.generated/compose.games.yaml`; Compose mounts the
 generated JSON and one read-only bind for every catalog game.
 
-`SESSION_ID`, `RENDER_NODE`, and `SPRITZ_DIR` are required. `GAMES_CATALOG`
-defaults to `games.yaml`; `GID_RENDER` and `GID_VIDEO` are required by Compose.
 `SESSION_ID` names the compose project, container `vulcan-<SESSION_ID>`, volume
 `vulcan_<SESSION_ID>-data`, and the default Apollo host name
 `Vulcan-<SESSION_ID>`. `VULCAN_DATA_DIR` is optional and selects a host
-directory for that volume; see [Session data location](#session-data-location).
+directory for that volume; see [Session data location](#55-session-data-location).
 
-### Game catalog
+### 5.1 Game catalog
 
-`games.yaml` is the source of truth:
+`games.yaml` is the source of truth. The fields and examples are documented in
+[`games.example.yaml`](games.example.yaml).
 
-```yaml
-eden_content: /srv/eden/content
-
-games:
-  - id: demo
-    name: Demo Game
-    source: /srv/games/demo
-    exe: Demo.exe
-
-  - id: other
-    name: Other Game
-    source: /srv/games/other
-    exe: Other.exe
-    wine_source: /srv/wine/other
-    reset_paths:
-      - Data/Login
-      - Data/Cache
-
-  - id: mario
-    name: Super Mario 3D World
-    runner: eden
-    source: /srv/games/mario
-    rom: game.xci
-```
-
-- `id` is unique, safe as a path segment, and identifies the overlay, prefix,
-  Apollo app, and log lines.
-- `name` is the app label shown to clients.
-- `source` is an absolute host directory. Only catalog directories are
-  mounted, read-only, at `/games-ro/<id>`.
-- `runner` selects the launcher. `wine` is the default; `eden` runs a native
-  emulator, see [Eden entries](#eden-entries).
-- `exe` is relative to `source`; the writable overlay path is
-  `/games/<id>/<exe>`. Wine entries require it.
-- `rom` is relative to `source` and selects the emulator image. Eden entries
-  require it; a file name with an apostrophe needs double quotes in the
-  catalog.
-- `reset_paths` are relative to the game directory and are removed once per
-  Wine prefix, never on the host.
-- `wine_source` is optional. Set it to an absolute host Wine tree when games
-  need different Wine builds; it is mounted at `/wine/<id>` and overrides the
-  session `SPRITZ_DIR`. Without it, every game uses the session Wine tree.
-- `eden_content` is optional and session-wide. It is an absolute host
-  directory mounted read-only at `/eden-content` for updates and DLC.
-- `uuid` is optional. Empty derives a stable UUID from `id`; set it to keep an
-  existing client app identity.
-
-Every entry mounts exactly one `source` directory, whatever its runner, because
-the overlay needs a directory as its lower layer. Several entries may share one
-`source`, each naming its own `exe` or `rom`; that is how a directory holding
-several game images is used.
+`make` validates every entry: ids are unique and safe path segments, each
+entry has one readable `source`, Wine entries name `exe`, and Eden entries
+name `rom`. Every entry mounts exactly one source directory, whatever its
+runner, because the overlay needs a directory as its lower layer. Several
+entries may share one source, each naming its own `exe` or `rom`; that is how
+a directory holding several game images is used.
 
 The container creates one Wine prefix per game under `/data/prefix/<id>` on
 the first launch.
 
-Apollo reads one app per catalog entry from `/data/apollo/apps.json`. Selecting
-an app starts `launch-game.sh <id>`, which resolves that game's overlay, Wine
-prefix, and reset paths. The container runs one game at a time; a second app
-start exits while the first holds the session lock.
-
-### Eden entries
+### 5.2 Eden entries
 
 An `eden` entry runs the Switch emulator directly. The game image stays on the
 read-only mount instead of being installed into the emulated NAND. Eden writes
@@ -304,8 +264,9 @@ The emulator reads `prod.keys` and the installed firmware from that directory.
 Install them once from your own console dump, through the setup app below or
 by copying the files into the session volume.
 
-`eden_content` mounts an absolute host directory read-only at `/eden-content`
-as a source for updates and DLC.
+`eden_content`, documented in [`games.example.yaml`](games.example.yaml),
+mounts an absolute host directory read-only at `/eden-content` as a source for
+updates and DLC.
 
 Any session with an `eden` entry also gets an `Eden Setup` app. It opens the
 emulator without a game, so the first-run work can be done once per session
@@ -318,11 +279,12 @@ volume:
 Eden does not use `PRODINFO.bin` or the console certificate.
 
 The firmware archive is only read during the install: Eden stores the extracted
-titles under `nand/system` and reads those. Any path Eden can browse works, and
-a directory inside the session volume needs no extra mount; the optional
-`eden_content` mount is one way to expose a host directory. Delete the archive,
-and the mount if one was used, once the install finishes. `prod.keys` must
-stay, because Eden reads it on every start.
+titles under `nand/system` and reads those.
+
+Any path Eden can browse works, and a directory inside the session volume
+needs no extra mount; the optional `eden_content` mount is one way to expose a
+host directory. Delete the archive, and the mount if one was used, once the
+install finishes. `prod.keys` must stay, because Eden reads it on every start.
 
 With the default Docker volume there is no host path to copy into, so the files
 have to travel through the container and then change owner; Eden runs as the
@@ -337,7 +299,7 @@ docker exec vulcan-<session> chown 1000:1000 \
 docker exec vulcan-<session> chmod 600 /data/home/.local/share/eden/keys/prod.keys
 ```
 
-#### Enabling the gamepad
+#### 5.2.1 Enabling the gamepad
 
 Controller input arrives over Cemuhook (DSU) UDP: `vulcan-dsud` serves the pad
 state that `vulcan-inputd` writes on `127.0.0.1:26760`. Eden disables the UDP
@@ -351,12 +313,13 @@ client by default, so enable it once per volume:
    press `Configure` to fill the buttons and sticks.
 
 The server address and port come from the `udp_input_servers` entry in
-`qt-config.ini`; the default `127.0.0.1:26760` matches the server. Without a
-connected pad the gamepad server reports a centered, buttonless pad, so the
-emulator never sees a deflected stick. The endpoint is exclusive: the launcher
-refuses to start the emulator when another process owns it. The session
-network namespace keeps the port private, so concurrent Eden sessions can use
-the same default.
+`qt-config.ini`; the default `127.0.0.1:26760` matches the server.
+
+Without a connected pad the gamepad server reports a centered, buttonless pad,
+so the emulator never sees a deflected stick. The endpoint is exclusive: the
+launcher refuses to start the emulator when another process owns it. The
+session network namespace keeps the port private, so concurrent Eden sessions
+can use the same default.
 
 Eden generates the device identifier itself, so the mapping stays out of the
 catalog.
@@ -365,7 +328,7 @@ Native entries have no rumble: Eden's DSU client has no rumble message, and
 the XInput proxy only exists inside Wine. Set `VULCAN_DSUD=0` to start the
 emulator without the gamepad server.
 
-#### Texture mods
+#### 5.2.2 Texture mods
 
 Eden loads mods from the session volume without a setting:
 
@@ -374,12 +337,11 @@ Eden loads mods from the session volume without a setting:
 ```
 
 The tree under `romfs` mirrors the game's own tree, so a mod replaces the
-files it ships. `<title id>` is the base title, for example
-`010028600EBDA000` for Super Mario 3D World + Bowser's Fury. Several mods can
-sit side by side, one directory each, and a mod may also ship `exefs` and
+files it ships. `<title id>` is the base title's 16-hex-digit ID. Several mods
+can sit side by side, one directory each, and a mod may also ship `exefs` and
 `cheats`. A mod is user content: match it to the installed game version.
 
-### Game directories and overlays
+### 5.3 Game directories and overlays
 
 Each catalog game is mounted read-only at `/games-ro/<id>`. An overlay inside
 the container presents a writable view at `/games/<id>`:
@@ -396,9 +358,11 @@ override adds one bind mount per game; there is no shared game root.
 A host game directory can also contain state written outside the container,
 including stored logins under `Data/Login` and cached credentials under
 `Data/Cache`. Because it is the lower layer, a fresh volume still starts
-signed in. The catalog `reset_paths` field lists game-relative paths to remove
-once per Wine prefix; removals land in the overlay upper layer and the host
-files stay untouched. A changed field takes effect on a fresh prefix, or after
+signed in.
+
+The catalog `reset_paths` field lists game-relative paths to remove once per
+Wine prefix; removals land in the overlay upper layer and the host files stay
+untouched. A changed field takes effect on a fresh prefix, or after
 `make clean-overlay` clears the marker.
 
 The session data volume contains one prefix and one overlay per game:
@@ -411,7 +375,7 @@ The session data volume contains one prefix and one overlay per game:
 The overlay mount requires `CAP_SYS_ADMIN`, which is granted to the entrypoint.
 The game runs as a non-root user without that capability.
 
-### Sessions
+### 5.4 Sessions
 
 `P` selects one preset or a colon-separated list. The value is a path relative
 to the repository root; `.env.local` is the default. Each `SESSION_ID` gets its
@@ -450,7 +414,7 @@ at a time, such as `logs`, `shell`, `btop`, `nvtop`, `watch`, `volume`,
 list only those presets. Volumes of sessions that are no longer configured
 remain on the host; remove them with `docker volume rm`.
 
-### Session data location
+### 5.5 Session data location
 
 By default the session volume `vulcan_<SESSION_ID>-data` lives in Docker's
 data root. Set `VULCAN_DATA_DIR` to an absolute host directory to bind the
@@ -485,7 +449,7 @@ it only after the copy is verified.
 `make uninstall` leaves a host data directory in place. Remove the volume
 metadata and the directory manually after verifying the backup.
 
-### Ports
+### 5.6 Ports
 
 Every preset that runs at the same time needs a non-overlapping
 `APOLLO_PORT`, because Apollo derives all of its listeners from that value and
@@ -496,19 +460,22 @@ every listener ends up on the host:
 | TCP | `base - 5`, `base`, `base + 1`, `base + 21` |
 | UDP | `base + 9`, `base + 10`, `base + 11`, `base + 13` |
 
-Pick bases whose ranges do not intersect on the same protocol. The tracked
-example uses `48006`; a second session on `48040` does not overlap it. Run
-`make check-ports P=".env.multi:.env.other"` before starting a set; `up` and
-`restart` run the same check. `make ports P=".env.multi:.env.other"` prints the
-derived table for those presets. Clients that only use the default port cannot
-reach a preset with a custom base port.
+Pick bases whose ranges do not intersect on the same protocol. The
+`.env.multi.example` preset uses `48006`; a second session on `48040` does not
+overlap it.
+
+Run `make check-ports P=".env.multi:.env.other"` before starting a set; `up`
+and `restart` run the same check. `make ports P=".env.multi:.env.other"` prints
+the derived table for those presets. Clients that only use the default port
+cannot reach a preset with a custom base port.
 
 The session gets its own network namespace and publishes those ports from
 `.generated/compose.netns.yaml`. Loopback stays inside the session, so the
-gamepad server and Wine services are isolated between sessions. The client
-still uses the host address and the same port numbers. OBS capture runs
-through the capture relay. LAN broadcast discovery stays on the host and does
-not reach the session.
+gamepad server and Wine services are isolated between sessions.
+
+The client still uses the host address and the same port numbers. OBS capture
+runs through the capture relay. LAN broadcast discovery stays on the host and
+does not reach the session.
 
 The namespace has no IPv6 address on its bridge interface, so Apollo binds
 IPv4 inside it (`address_family = ipv4`). Clients can still reach the session
@@ -522,7 +489,7 @@ apply. `make uninstall` removes the container and volume of one preset and
 leaves the image while another preset still uses it;
 `make uninstall P="a:b"` removes the image once the last container is gone.
 
-## Fresh deployment
+## 6. Fresh deployment
 
 These steps start from a checkout with no image, volume, or local preset.
 The `make` targets add `compose.nvidia.yaml` when `GPU_VENDOR=nvidia`;
@@ -604,9 +571,9 @@ AMD/Intel presets use the same targets without it.
    ```
 
 To add or remove games, edit `games.yaml` and restart the session; see
-[Game catalog](#game-catalog).
+[Game catalog](#51-game-catalog).
 
-### NVIDIA devices
+### 6.1 NVIDIA devices
 
 NVIDIA uses the host NVIDIA Container Toolkit and CDI:
 
@@ -629,7 +596,7 @@ devices:
 
 NVENC needs the primary DRM node of the NVIDIA GPU. The toolkit CDI spec
 includes it. AMD and Intel do not need it; see
-[AMD and Intel](#amd-and-intel).
+[AMD and Intel](#62-amd-and-intel).
 
 ```bash
 # make config has already generated .generated/compose.games.yaml
@@ -650,7 +617,7 @@ lists the GPU, and `ffmpeg -encoders` includes `nvenc`. Apollo logs
 `Found DRM primary node` and `Found CUDA device`; without the primary node
 NVENC fails and the session falls back to software encoding.
 
-### AMD and Intel
+### 6.2 AMD and Intel
 
 VAAPI opens the render node in `APOLLO_ADAPTER`, or `/dev/dri/renderD128` when
 it is empty. It never opens a primary card node. Set `APOLLO_ADAPTER` when the
@@ -680,7 +647,7 @@ Neither path uses the NVIDIA toolkit or `compose.nvidia.yaml`; only the render
 node is passed. `make stats` reads `nvidia-smi`; on AMD/Intel, use
 `docker stats` for CPU and memory.
 
-## Display and game
+## 7. Display and game
 
 Defaults:
 
@@ -698,7 +665,7 @@ Set `APOLLO_NAME` to override the host name (`Vulcan-<SESSION_ID>` by
 default). `GAMESCOPE_RT=1` passes `--rt` to gamescope;
 `GAMESCOPE_FORCE_WINDOWS_FULLSCREEN=0` disables its fullscreen flag.
 
-### Sway and Xwayland
+### 7.1 Sway and Xwayland
 
 Sway runs with `WLR_BACKENDS=headless`. Pointer and keyboard input reaches the
 game through gamescope EIS, so Sway has no input device and does not draw the
@@ -708,20 +675,22 @@ streamed cursor.
 `SWAY_ALLOW_SOFTWARE=0` disables the pixman fallback. On the tested NVIDIA
 headless session, forcing `gles2` keeps a backend DRM FD so gamescope can use
 its DMA-BUF path; without it Sway logs `Failed to get backend DRM FD` on each
-client connection and falls back to shared memory. The sample preset leaves
-both unset; the tested session uses GLES2 without the software fallback.
+client connection and falls back to shared memory.
+
+The sample preset leaves both unset; the tested session uses GLES2 without the
+software fallback.
 
 Sway does not start Xwayland while gamescope is enabled: gamescope runs its
 own X server for Wine. `GAMESCOPE_ENABLED=0` re-enables Xwayland for the
 direct Sway path.
 
-### OBS capture
+### 7.2 OBS capture
 
 The image contains only the `obs-vkcapture` capture sender. Host OBS runs the
 receiver plugin:
 
 ```text
-container: Wine/game -> obs-vkcapture layer -> abstract socket
+container: game -> obs-vkcapture layer -> abstract socket
 host:      OBS -> linux-vkcapture plugin -> DMA-BUF
 ```
 
@@ -730,6 +699,7 @@ scopes to the network namespace. The session runs `vulcan-capture-bridge`: the
 session side binds the sender's abstract name and forwards each connection
 over a sequpacket socket in the session runtime directory, and the `capture`
 service shares the host namespace and hands the connection to the plugin.
+
 Frames keep their dmabuf descriptors, so the plugin imports the same buffers
 as with a direct connection.
 
@@ -750,6 +720,9 @@ gamescope ... -- obs-gamecapture wine game
 gamescope ... -- obs-gamecapture eden -f -g game.xci
 ```
 
+The wrapper sets `OBS_VKCAPTURE` only for the game process. gamescope does not
+load the capture layer, so its own Vulkan instance is not captured.
+
 Set `OBS_VKCAPTURE=0` to disable capture. A missing host OBS or plugin does not
 stop the game.
 
@@ -768,6 +741,7 @@ The layer build applies a local fallback patch: when the next Vulkan layer
 hides the swapchain entry points from `vkGetDeviceProcAddr`, the layer calls
 the instance trampoline instead. The Eden AppImage presents that way under
 Gamescope WSI, so without the fallback the layer loads but never connects.
+
 The patch applies to the pinned `OBS_VKCAPTURE_REF`; bumping the reference
 requires rebasing it, and the build fails when it no longer applies.
 
@@ -775,7 +749,7 @@ Capture is limited to the game process: it does not include gamescope cursor,
 FSR/NIS, HDR tone mapping, or gamescope/Steam overlays. Audio is not captured
 by `obs-vkcapture`.
 
-### OBS audio
+### 7.3 OBS audio
 
 The session Pulse socket is mounted at a host runtime directory:
 
@@ -796,7 +770,7 @@ make audio-down P=.env.multi
 `audio-status` prints the tunnel and monitor module state plus the source state.
 `audio-down` unloads both modules.
 
-#### Audio from Apollo stream
+#### 7.3.1 Audio from Apollo stream
 
 Status: current mode.
 
@@ -818,7 +792,7 @@ the stream runs. Add an Audio Input Capture source in OBS and select
 with client video. Do not enable OBS monitoring for the same source at the
 same time.
 
-#### Audio without Apollo
+#### 7.3.2 Audio without Apollo
 
 Status: tunnel supported; direct game launch is not implemented.
 
@@ -838,6 +812,7 @@ launcher is not implemented.
 
 `AUDIO_RUNTIME_DIR` defaults to
 `/run/user/<uid>/vulcan/<SESSION_ID>`; set it in the preset to override.
+
 `AUDIO_SOURCE` overrides the tunnel source; the default is
 `sink-sunshine-stereo.monitor`. `AUDIO_LATENCY_MSEC` controls the fixed tunnel
 buffer; the default is `60`. `AUDIO_MONITOR_LATENCY_MSEC` controls the loopback
@@ -846,12 +821,14 @@ safer.
 
 This is opt-in: `make up` does not load the tunnel or monitor. The host needs
 PipeWire or PulseAudio with `pactl` and module loading available; the game keeps
-running if audio export fails. Use `make audio-up P=.env.multi AUDIO_MONITOR=1`
-or set `AUDIO_MONITOR=1` in the preset. `make stop`, `make down`, and
-`make uninstall` unload both modules; `uninstall` also removes the session audio
-runtime. Use `audio-down` for a manual unload.
+running if audio export fails.
 
-### Wine environment
+Use `make audio-up P=.env.multi AUDIO_MONITOR=1` or set `AUDIO_MONITOR=1` in
+the preset. `make stop`, `make down`, and `make uninstall` unload both modules;
+`uninstall` also removes the session audio runtime. Use `audio-down` for a
+manual unload.
+
+### 7.4 Wine environment
 
 `launch-game.sh` exports these before Wine starts; override them in the
 selected env file:
@@ -870,14 +847,16 @@ selected env file:
 - `DXVK_HUD` is empty by default; set it to e.g. `fps,frametimes` to show the
   DXVK overlay.
 
-### GPU path
+### 7.5 GPU path
 
 The container receives the render node named by `RENDER_NODE`. On NVIDIA,
 `compose.nvidia.yaml` adds the CDI device `nvidia.com/gpu=0`, which includes
-the primary card node and the driver libraries. AMD/Intel need only the render
-node. A host iGPU is not passed through. CDI selects the NVIDIA device;
-`RENDER_NODE` must be the render node of the GPU that runs gamescope and the
-encoder; see [Fresh deployment](#fresh-deployment).
+the primary card node and the driver libraries.
+
+AMD/Intel need only the render node. A host iGPU is not passed through. CDI
+selects the NVIDIA device; `RENDER_NODE` must be the render node of the GPU
+that runs gamescope and the encoder; see
+[Fresh deployment](#6-fresh-deployment).
 
 Every streamed frame goes through two composition steps:
 
@@ -895,10 +874,9 @@ Keeping every step on one GPU matters more than the extra pass. Pointing
 cross-GPU dmabuf import for every frame, and drops Apollo out of the zero-copy
 VRAM capture path into a GPU -> RAM -> GPU transfer.
 
-Change resolution or FPS in the selected env file:
-
-- `GAME_WIDTH`, `GAME_HEIGHT`, `GAME_FPS`
-- `RENDER_NODE` if the encoder GPU moves to another render node
+Change resolution or FPS in the selected env file; the variables are
+documented in [`.env.multi.example`](.env.multi.example). Move `RENDER_NODE`
+when the encoder GPU changes.
 
 The Sway config is rendered from `config/sway/config.in` at startup, so the
 template only needs editing for structural changes.
@@ -917,7 +895,7 @@ through gamescope's EIS socket and gamescope composites the streamed cursor.
 With `GAMESCOPE_ENABLED=0` the game renders directly under Sway, but the
 container then has neither pointer/keyboard input nor a streamed cursor.
 
-## Input
+## 8. Input
 
 `INPUT_TRANSPORT=socket` is the only supported path. Apollo's libevdev
 uinput calls are intercepted by a Rust shim and sent over a Unix socket to
@@ -942,7 +920,7 @@ serves one connection at a time with a blocking read loop, so a second client
 waits in the socket backlog. This matches the one-shim-per-container model.
 Revisit it if multiple producers need the same socket.
 
-### Cursor
+### 8.1 Cursor
 
 The streamed cursor is the game's own cursor image, drawn by gamescope and
 captured by Apollo with the rest of the frame. gamescope runs with
@@ -958,7 +936,7 @@ handing it to Sway.
 - `GAMESCOPE_HIDE_CURSOR_DELAY` is the idle timeout in milliseconds before
   gamescope hides the cursor; the default `86400000` keeps it visible.
 
-### Gamepad
+### 8.2 Gamepad
 
 ```text
 Apollo gamepad -> shim -> vulcan-inputd -> vulcan-gamepad.bin
@@ -979,27 +957,34 @@ sets `WINEDLLOVERRIDES`. The 64-bit DLL goes to
 `drive_c/windows/system32`, the 32-bit DLL to `drive_c/windows/syswow64`,
 because a 32-bit process resolves `system32` to `syswow64`. Set
 `INPUT_GAMEPAD=0` to skip the pad state file, the rumble link, and the DLLs.
+
 Games that use DirectInput or raw HID instead of XInput do not see a
 controller.
 
 The proxy exposes the virtual pad at slot 0 from process start, so games
 that enumerate XInput once at startup still find it before the client sends
-its first report. Until `vulcan-inputd` marks the pad connected, the state is
-neutral; a client without a controller therefore still sees a pad at rest,
-and games may show controller prompts until a real pad or keyboard/mouse
-input arrives. The guide button is reported only through the undocumented
-ordinal 100, which SDL and most overlays use; the documented
-`XInputGetState` masks it out and `XInputGetCapabilities` keeps the
-real-hardware mask `0xF3FF`.
+its first report.
+
+Until `vulcan-inputd` marks the pad connected, the state is neutral; a client
+without a controller therefore still sees a pad at rest, and games may show
+controller prompts until a real pad or keyboard/mouse input arrives.
+
+The guide button is reported only through the undocumented ordinal 100, which
+SDL and most overlays use; the documented `XInputGetState` masks it out and
+`XInputGetCapabilities` keeps the real-hardware mask `0xF3FF`.
+
 Vibration is forwarded to the client. `XInputSetState` writes both motor
 speeds to `C:\vulcan-data\vulcan-rumble.bin`, which is the session's
 `/data/vulcan-rumble.bin`; the Apollo build reads that file and sends the
-usual rumble feedback message. `launch-game.sh` links `C:\vulcan-data` to
-`VULCAN_RUMBLE_DIR` (default `/data`) so the atomic rewrite stays inside the
-session volume. The proxy keeps the last value until the game changes it and
-stops it when the pad is removed. `launch-game.sh` runs the game as a child.
-It clears a stale record and lock before a new game, watches for the game
-process to exit, runs `wineserver -k` and terminates leftover `winedevice`
+usual rumble feedback message.
+
+`launch-game.sh` links `C:\vulcan-data` to `VULCAN_RUMBLE_DIR` (default
+`/data`) so the atomic rewrite stays inside the session volume. The proxy
+keeps the last value until the game changes it and stops it when the pad is
+removed. `launch-game.sh` runs the game as a child.
+
+The launcher clears a stale record and lock before a new game, watches for the
+game process to exit, runs `wineserver -k` and terminates leftover `winedevice`
 processes so Wine services and gamescope stop, and clears the record and lock
 again after the wrapper exits.
 
@@ -1013,19 +998,20 @@ resolves a relative path; `launch-game.sh` logs a warning and leaves rumble
 disabled when the directory is missing. The reader is applied to the default
 `apollo-git` build; a different `APOLLO_PKG` builds without it.
 
-### Multi-touch
+### 8.3 Multi-touch
 
 The shim forwards the `ABS_MT` sequence from Apollo's touch device and
-`vulcan-inputd` maps each contact to a libei touch. Contacts do not reach the
-game yet: gamescope 3.17 leaves `EIS_DEVICE_CAP_TOUCH` disabled in
-`src/InputEmulation.cpp` and logs `No touch support yet` for touch events. The
-forwarding path becomes active once gamescope advertises the capability; until
-then keep the client in a mouse mode, where touch arrives as absolute mouse
-events.
+`vulcan-inputd` maps each contact to a libei touch.
+
+Contacts do not reach the game yet: gamescope 3.17 leaves
+`EIS_DEVICE_CAP_TOUCH` disabled in `src/InputEmulation.cpp` and logs
+`No touch support yet` for touch events. The forwarding path becomes active
+once gamescope advertises the capability; until then keep the client in a
+mouse mode, where touch arrives as absolute mouse events.
 
 `GAMESCOPE_TOUCH_MODE` controls gamescope's touch handling.
 
-### Session isolation
+### 8.4 Session isolation
 
 Each container owns its input socket, runtime directory, and gamescope
 instance, so two presets can stream at the same time without sharing input.
@@ -1041,7 +1027,7 @@ ports, so loopback endpoints such as the gamepad server are private to the
 session. OBS capture still works: the session relays the sender connection to
 the `capture` service in the host namespace.
 
-## Logs
+## 9. Logs
 
 ```bash
 docker compose --env-file .env.local exec game tail -f /data/apollo/sunshine.log
@@ -1055,12 +1041,13 @@ Apollo writes its own log to `/data/apollo/sunshine.log`. `session-start.log`
 holds the session startup and Apollo console output; `sway.log` holds Sway only.
 `vulcan-capture-bridge.log` records relay connections; the host half of the
 relay logs to `docker logs vulcan-<SESSION_ID>-capture`.
+
 `APOLLO_LOG_LEVEL` defaults to `2` (info); `0` and `1` enable verbose/debug
 logging and grow quickly during streaming.
 
-## Maintenance
+## 10. Maintenance
 
-### Session cleanup
+### 10.1 Session cleanup
 
 Session cleanup targets remove parts of the volume and keep Apollo state:
 
@@ -1072,13 +1059,15 @@ Session cleanup targets remove parts of the volume and keep Apollo state:
 | `make clean-all` | all of the above |
 
 Each target stops the container, removes its paths, and starts the container
-again. `clean-overlay` also drops the reset markers: the fresh overlays no
-longer hold the whiteouts from the previous reset, so the next launch applies
-the catalog `reset_paths` again. Use it after the host changes files the
+again.
+
+`clean-overlay` also drops the reset markers: the fresh overlays no longer
+hold the whiteouts from the previous reset, so the next launch applies the
+catalog `reset_paths` again. Use it after the host changes files the
 container had already written, since the overlay keeps the container's copy
 until it is removed.
 
-### Updating game files
+### 10.2 Updating game files
 
 To update a game, stop the container and run the updater/launcher outside the
 streaming container, or start a separate maintenance container with a
@@ -1086,7 +1075,7 @@ read-write mount. Do not expose a read-write game directory while streaming.
 Run `make clean-overlay` afterwards so the container stops using the copies it
 wrote into its overlay and reads the updated tree.
 
-#### Stale overlay after a host update
+#### 10.2.1 Stale overlay after a host update
 
 An overlay upper layer can outlive the host tree it was built from. The upper
 copy then hides the updated file in the lower layer, and the game keeps reading
@@ -1101,7 +1090,7 @@ a different value in the lower and upper layer confirms the mismatch.
 `clean-overlay` also removes the reset markers, so the catalog `reset_paths`
 runs again on the next launch.
 
-### Recreating a Wine prefix
+### 10.3 Recreating a Wine prefix
 
 A game that hangs or crashes before its first frame, while the same game files
 work outside the container, may have a corrupted Wine prefix. Reset one game
@@ -1134,7 +1123,7 @@ service files from a prefix suspected to be corrupt; they can carry the fault
 into the new prefix. Remove the backup after a game has launched from the new
 prefix.
 
-### Migrating from per-game presets
+### 10.4 Migrating from per-game presets
 
 Per-game presets are not read by this version. Create `.env.multi` and
 `games.yaml` instead. Old volumes remain on the host; the new session uses
@@ -1152,7 +1141,7 @@ docker run --rm -v vulcan_<old_game>-data:/old \
 The overlay can be rebuilt from the host game directory; copy it only if the
 container had local writes that must survive.
 
-## Security
+## 11. Security
 
 This is a rootful container with the capabilities listed below. It does not
 receive `/dev/uinput`, `/dev/uhid`, or host input devices, and does not install
@@ -1176,7 +1165,7 @@ Additional hardening:
 - do not mount the host Wayland/X11 sockets
 - keep `/dev/uinput` out of the container
 
-## Limitations
+## 12. Limitations
 
 - One active game per session at a time; separate sessions can run in parallel.
 - Apollo Linux has no Windows-style virtual display; Sway provides it.
@@ -1201,7 +1190,7 @@ Additional hardening:
   no synchronization with client video.
 - `make stats` reports GPU usage only on NVIDIA.
 
-## Validation checklist
+## 13. Validation checklist
 
 Before building, or after changing Rust code, run on the host:
 
