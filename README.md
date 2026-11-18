@@ -743,11 +743,11 @@ session runtime directory. This does not change the Sway/Apollo path.
 `<SESSION_ID>-<GAME_ID>`, so two sessions running the same executable remain
 distinguishable. Set `OBS_VKCAPTURE_NAME` to override it.
 
-The wrapper covers only the Wine command, inside gamescope, matching a Lutris
-`prefix_command = obs-gamecapture` setup:
+The wrapper covers the game command inside gamescope for both runners:
 
 ```text
 gamescope ... -- obs-gamecapture wine game
+gamescope ... -- obs-gamecapture eden -f -g game.xci
 ```
 
 Set `OBS_VKCAPTURE=0` to disable capture. A missing host OBS or plugin does not
@@ -763,6 +763,13 @@ Host requirements:
 The container builds only the capture layer (`-DBUILD_PLUGIN=OFF`) and pins the
 source with `OBS_VKCAPTURE_REF`; there is no automatic host-version detection.
 Change the reference and rebuild when the host plugin changes.
+
+The layer build applies a local fallback patch: when the next Vulkan layer
+hides the swapchain entry points from `vkGetDeviceProcAddr`, the layer calls
+the instance trampoline instead. The Eden AppImage presents that way under
+Gamescope WSI, so without the fallback the layer loads but never connects.
+The patch applies to the pinned `OBS_VKCAPTURE_REF`; bumping the reference
+requires rebasing it, and the build fails when it no longer applies.
 
 Capture is limited to the game process: it does not include gamescope cursor,
 FSR/NIS, HDR tone mapping, or gamescope/Steam overlays. Audio is not captured

@@ -181,11 +181,18 @@ FROM build-tools AS vkcapture-builder
 # Build only the capture sender. The OBS plugin belongs to the host OBS
 # process; pulling obs-studio into the game image would be unnecessary.
 ARG OBS_VKCAPTURE_REF=v1.5.6
+COPY docker/patches/obs-vkcapture-device-proc-fallback.patch /tmp/
 
+# The layer falls back to the instance trampoline when the next layer hides
+# the swapchain entry points from GetDeviceProcAddr (the Eden AppImage under
+# Gamescope WSI). The check keeps a ref bump from silently dropping the
+# fallback.
 RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
     pacman -S --noconfirm --needed --disable-download-timeout cmake vulkan-headers \
     && git clone https://github.com/nowrep/obs-vkcapture /src/obs-vkcapture \
     && git -C /src/obs-vkcapture checkout "$OBS_VKCAPTURE_REF" \
+    && git -C /src/obs-vkcapture apply --check /tmp/obs-vkcapture-device-proc-fallback.patch \
+    && git -C /src/obs-vkcapture apply /tmp/obs-vkcapture-device-proc-fallback.patch \
     && cmake -S /src/obs-vkcapture -B /src/obs-vkcapture/build \
         -DCMAKE_BUILD_TYPE=Release \
         -DBUILD_PLUGIN=OFF \

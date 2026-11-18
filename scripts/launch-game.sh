@@ -76,7 +76,10 @@ GAMESCOPE_ARGS=()
 gamescope_args GAMESCOPE_ARGS
 
 # OBS is an optional receiver; a missing wrapper must not stop the game.
-OBS_VKCAPTURE="${OBS_VKCAPTURE:-1}"
+# The wrapper sets OBS_VKCAPTURE for the game process. Clear it here so the
+# layer does not load into gamescope's own Vulkan instance.
+OBS_VKCAPTURE_ENABLED="${OBS_VKCAPTURE:-1}"
+unset OBS_VKCAPTURE
 OBS_GAMECAPTURE_BIN="${OBS_GAMECAPTURE_BIN:-/usr/bin/obs-gamecapture}"
 
 # wrap_capture prefixes a runner array with the capture sender.
@@ -86,7 +89,7 @@ OBS_GAMECAPTURE_BIN="${OBS_GAMECAPTURE_BIN:-/usr/bin/obs-gamecapture}"
 # plugin through the capture relay, which the session start script runs.
 wrap_capture() {
     local -n target="$1"
-    [ "$OBS_VKCAPTURE" = "1" ] || return 0
+    [ "$OBS_VKCAPTURE_ENABLED" = "1" ] || return 0
     export OBS_VKCAPTURE_NAME="${OBS_VKCAPTURE_NAME:-${SESSION_ID:-vulcan}-${GAME_ID}}"
     if [ -x "$OBS_GAMECAPTURE_BIN" ]; then
         target=("$OBS_GAMECAPTURE_BIN" "${target[@]}")

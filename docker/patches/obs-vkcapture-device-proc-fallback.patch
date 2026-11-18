@@ -1,0 +1,19 @@
+--- a/src/vklayer.c
++++ b/src/vklayer.c
+@@ -1525,10 +1525,16 @@
+     struct vk_device_funcs *dfuncs = &data->funcs;
+     bool funcs_found = true;
+ 
++    /* The next layer can hide swapchain entry points from
++     * GetDeviceProcAddr while the device still presents (Gamescope WSI).
++     * Fall back to the instance trampoline for the same command. */
+ #define GETADDR(x)                                         \
+     do {                                               \
+         dfuncs->x = (PFN_vk##x)gdpa(device, "vk" #x); \
+         if (!dfuncs->x) {                          \
++            dfuncs->x = (PFN_vk##x)gipa(idata->instance, "vk" #x); \
++        }                                          \
++        if (!dfuncs->x) {                          \
+             hlog("could not get device "       \
+                     "address for vk" #x);         \
+             funcs_found = false;               \

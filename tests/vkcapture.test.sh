@@ -40,11 +40,16 @@ check_contains 'compose passes the capture ref' 'OBS_VKCAPTURE_REF' "$compose"
 check_contains 'capture is enabled by default' 'OBS_VKCAPTURE: "${OBS_VKCAPTURE:-1}"' "$compose"
 check_contains 'compose passes the capture name override' 'OBS_VKCAPTURE_NAME' "$compose"
 check_contains 'image tag includes the capture ref' '$(OBS_VKCAPTURE_REF)' "$makefile"
-check_contains 'launcher defaults capture on' 'OBS_VKCAPTURE="${OBS_VKCAPTURE:-1}"' "$launcher"
+check_contains 'launcher defaults capture on' 'OBS_VKCAPTURE_ENABLED="${OBS_VKCAPTURE:-1}"' "$launcher"
+check_contains 'launcher keeps the layer out of gamescope' 'unset OBS_VKCAPTURE' "$launcher"
 check_contains 'launcher wraps the runner' 'target=("$OBS_GAMECAPTURE_BIN" "${target[@]}")' "$launcher"
 check_contains 'launcher uses the capture helper for wine' 'wrap_capture runner' "$launcher"
 check_missing 'launcher does not skip capture in a session namespace' \
     'OBS capture needs the host network namespace' "$launcher"
+check_contains 'capture layer applies the device-proc fallback' \
+    'obs-vkcapture-device-proc-fallback.patch' "$dockerfile"
+check_contains 'fallback uses the instance proc address' \
+    'gipa(idata->instance' "$repo_root/docker/patches/obs-vkcapture-device-proc-fallback.patch"
 check_contains 'image ships the capture relay' 'vulcan-capture-bridge' "$dockerfile"
 check_contains 'image asserts the relay frame size' 'CAPTURE_TEXTURE_DATA_SIZE == 128' "$dockerfile"
 check_contains 'session start runs the relay' \
