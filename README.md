@@ -315,6 +315,31 @@ client by default, so enable it once per volume:
 3. `Emulation → Configure → Input → Player 1`: select `UDP Controller 0` and
    press `Configure` to fill the buttons and sticks.
 
+`vulcan-dsud` maps the XInput buttons by physical position, not by the Xbox
+label. The default mapping therefore follows the Switch layout:
+
+| Physical (Xbox) | DSU | Eden default |
+| --- | --- | --- |
+| A (bottom) | Cross (`16384`) | B (cancel) |
+| B (right) | Circle (`8192`) | A (accept) |
+| X (left) | Square (`32768`) | Y |
+| Y (top) | Triangle (`4096`) | X |
+
+This is intentional: the physical positions match the Switch prompts. To use
+the Xbox labels instead (A accepts), swap all four face buttons in
+`Configure`, or replace the `button:` value on the `player_0_button_*` lines
+in `qt-config.ini`:
+
+| Eden button | DSU value |
+| --- | --- |
+| A | `16384` |
+| B | `8192` |
+| X | `32768` |
+| Y | `4096` |
+
+Swapping A/B is enough for accept and cancel; swapping X/Y as well keeps all
+four face labels aligned with the Xbox controller.
+
 The server address and port come from the `udp_input_servers` entry in
 `qt-config.ini`; the default `127.0.0.1:26760` matches the server.
 
