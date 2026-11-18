@@ -30,7 +30,8 @@ check_missing() {
 }
 
 check_contains 'apollo captures the virtual sink' 'audio_sink = sink-sunshine-stereo' "$template"
-check_contains 'entrypoint creates that sink' 'sink_name=vulcan_game' "$entrypoint"
+check_contains 'entrypoint creates the apollo sink' 'sink_name=sink-sunshine-stereo' "$entrypoint"
+check_contains 'entrypoint keeps the game sink' 'sink_name=vulcan_game' "$entrypoint"
 check_contains 'entrypoint makes it the default sink' 'set-default-sink vulcan_game' "$entrypoint"
 check_contains 'apollo log level is templated' 'min_log_level = @LOG_LEVEL@' "$template"
 check_contains 'entrypoint renders the log level' '@LOG_LEVEL@' "$entrypoint"

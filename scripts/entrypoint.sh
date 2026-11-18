@@ -146,6 +146,10 @@ as_game env \
         pactl load-module module-null-sink \
             sink_name=vulcan_game \
             sink_properties=device.description=vulcan_game >/dev/null 2>&1 || true
+        pactl list short sinks | cut -f2 | grep -qx sink-sunshine-stereo \
+            || pactl load-module module-null-sink \
+                sink_name=sink-sunshine-stereo \
+                sink_properties=device.description=sink-sunshine-stereo >/dev/null 2>&1 || true
         pactl set-default-sink vulcan_game >/dev/null 2>&1 || true
     ' >/data/log/audio.log 2>&1 || true
 
