@@ -308,6 +308,27 @@ fn write_control(fd: RawFd, data: &[u8; CONTROL_SIZE]) -> io::Result<()> {
     Ok(())
 }
 
+/// Peer pid of a connected unix socket, or -1 when the kernel refuses.
+fn peer_pid(fd: RawFd) -> i32 {
+    let mut credentials: libc::ucred = unsafe { zeroed() };
+    let mut length = size_of::<libc::ucred>() as libc::socklen_t;
+    // SAFETY: the buffer matches the size the option writes.
+    let result = unsafe {
+        libc::getsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            &mut credentials as *mut libc::ucred as *mut libc::c_void,
+            &mut length,
+        )
+    };
+    if result == 0 {
+        credentials.pid
+    } else {
+        -1
+    }
+}
+
 fn shutdown_both(first: RawFd, second: RawFd) {
     // SAFETY: both descriptors belong to this pump until it returns.
     unsafe {
@@ -359,21 +380,32 @@ pub fn pump(sender: RawFd, plugin: RawFd) {
     }
 }
 
-fn accept_loop(listener: RawFd, mut connect: impl FnMut() -> io::Result<RawFd>) {
+fn accept_loop(
+    role: &'static str,
+    listener: RawFd,
+    mut connect: impl FnMut() -> io::Result<RawFd>,
+) {
     loop {
         let peer = match accept(listener) {
             Ok(peer) => peer,
             Err(error) => {
-                eprintln!("vulcan-capture-bridge: accept failed: {error}");
+                eprintln!("vulcan-capture-bridge: {role}: accept failed: {error}");
                 continue;
             }
         };
+        let pid = peer_pid(peer);
+        eprintln!("vulcan-capture-bridge: {role}: connection from pid {pid}");
         match connect() {
             Ok(relay) => {
-                std::thread::spawn(move || pump(peer, relay));
+                std::thread::spawn(move || {
+                    pump(peer, relay);
+                    eprintln!("vulcan-capture-bridge: {role}: pid {pid} disconnected");
+                });
             }
             Err(error) => {
-                eprintln!("vulcan-capture-bridge: cannot reach the other half: {error}");
+                eprintln!(
+                    "vulcan-capture-bridge: {role}: pid {pid} cannot reach the other half: {error}"
+                );
                 // SAFETY: the accepted descriptor is not shared yet.
                 unsafe { libc::close(peer) };
             }
@@ -389,19 +421,27 @@ pub fn serve_game(socket_path: &str, name: &str, ready_file: Option<&str>) -> io
         std::fs::write(path, format!("@{name}\n"))?;
     }
     eprintln!("vulcan-capture-bridge: listening on @{name} for {socket_path}");
-    accept_loop(listener, || connect_path(socket_path));
+    accept_loop("session", listener, || connect_path(socket_path));
     Ok(())
 }
 
 /// Serves the host side: accepts from `socket_path` and relays to the plugin.
 pub fn serve_host(socket_path: &str, name: &str, ready_file: Option<&str>) -> io::Result<()> {
-    let listener = bind_path(socket_path)?;
+    let listener = bind_path(socket_path).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!(
+                "cannot bind {socket_path}: {error}; \
+                 check that the session runtime directory exists and is writable"
+            ),
+        )
+    })?;
     listen(listener)?;
     if let Some(path) = ready_file {
         std::fs::write(path, format!("{socket_path}\n"))?;
     }
     eprintln!("vulcan-capture-bridge: relaying {socket_path} to @{name}");
-    accept_loop(listener, || connect_abstract(name));
+    accept_loop("host", listener, || connect_abstract(name));
     Ok(())
 }
 

@@ -40,9 +40,9 @@ MIRROR_COUNTRY ?=
 OBS_VKCAPTURE_REF ?= v1.5.6
 EDEN_VERSION ?= 0.2.1
 EDEN_SHA256 ?= 2fae658397daf13c118082a3eb65d61a6519967b5e22e6667756baecf6000c5a
-# host shares the host network namespace (default); netns gives the session its
-# own namespace and publishes the Apollo ports. OBS capture needs host.
-SESSION_NETWORK ?= host
+# netns gives the session its own network namespace and publishes the Apollo
+# ports (default); host shares the host network namespace instead.
+SESSION_NETWORK ?= netns
 GAMES_CATALOG ?= games.yaml
 AUDIO_RUNTIME_DIR ?= $(if $(XDG_RUNTIME_DIR),$(XDG_RUNTIME_DIR),/run/user/$(shell id -u))/vulcan/$(SESSION_ID)
 AUDIO_LATENCY_MSEC ?= 60
@@ -80,7 +80,7 @@ COMPOSE_NETWORK := $(if $(filter netns,$(SESSION_NETWORK)),-f $(NETNS_COMPOSE),-
 # The capture relay only exists in netns mode; the profile keeps it out of
 # host-networked sessions, where the sender reaches the plugin directly.
 COMPOSE_PROFILE := $(if $(filter netns,$(SESSION_NETWORK)),--profile netns,)
-COMPOSE = AUDIO_RUNTIME_DIR="$(AUDIO_RUNTIME_DIR)" docker compose $(COMPOSE_PROFILE) --env-file $(P_SINGLE) -f compose.yaml $(COMPOSE_NETWORK) $(COMPOSE_NVIDIA) $(COMPOSE_DATA) -f $(GAMES_COMPOSE)
+COMPOSE = AUDIO_RUNTIME_DIR="$(AUDIO_RUNTIME_DIR)" SESSION_NETWORK="$(SESSION_NETWORK)" docker compose $(COMPOSE_PROFILE) --env-file $(P_SINGLE) -f compose.yaml $(COMPOSE_NETWORK) $(COMPOSE_NVIDIA) $(COMPOSE_DATA) -f $(GAMES_COMPOSE)
 CONTAINER := vulcan-$(SESSION_ID)
 VOLUME := vulcan_$(SESSION_ID)-data
 UNINSTALL_VOLUME = $(if $(strip $(VULCAN_DATA_DIR)),$(COMPOSE) down,$(COMPOSE) down -v)

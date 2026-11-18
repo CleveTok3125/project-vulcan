@@ -1,7 +1,7 @@
 sunshine_name = @NAME@
 port = @PORT@
 origin_web_ui_allowed = lan
-address_family = both
+address_family = @ADDRESS_FAMILY@
 
 capture = wlr
 output_name = @OUTPUT@

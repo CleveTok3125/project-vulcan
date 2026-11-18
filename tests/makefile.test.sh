@@ -82,20 +82,22 @@ check_missing 'amd preset skips the nvidia override' 'compose.nvidia.yaml' "$out
 out="$(run_make up P=intel.env)"
 check_missing 'intel preset skips the nvidia override' 'compose.nvidia.yaml' "$out"
 
-# The default network mode shares the host namespace; netns publishes the ports.
+# The default network mode isolates the session; host is the opt-in mode.
 out="$(run_make up)"
+check_contains 'default mode publishes the apollo ports' 'compose.netns.yaml' "$out"
+check_missing 'default mode skips the host override' 'compose.host.yaml' "$out"
+check_contains 'default mode enables the capture profile' '--profile netns' "$out"
+check_contains 'default mode reaches the container' 'SESSION_NETWORK="netns"' "$out"
+out="$(run_make up SESSION_NETWORK=host)"
 check_contains 'host mode adds the host override' 'compose.host.yaml' "$out"
 check_missing 'host mode publishes no ports' 'compose.netns.yaml' "$out"
 check_missing 'host mode leaves the capture profile off' '--profile netns' "$out"
-out="$(run_make up SESSION_NETWORK=netns)"
-check_contains 'netns mode publishes the apollo ports' 'compose.netns.yaml' "$out"
-check_missing 'netns mode skips the host override' 'compose.host.yaml' "$out"
-check_contains 'netns mode enables the capture profile' '--profile netns' "$out"
-printf 'SESSION_ID=demo\nGAMES_CATALOG=games.yaml\nSESSION_NETWORK=netns\n' \
-    >"$workdir/netns.env"
-out="$(run_make up P=netns.env)"
-check_contains 'preset network mode is honored' 'compose.netns.yaml' "$out"
-check_missing 'preset network mode skips the host override' 'compose.host.yaml' "$out"
+check_contains 'host mode reaches the container' 'SESSION_NETWORK="host"' "$out"
+printf 'SESSION_ID=demo\nGAMES_CATALOG=games.yaml\nSESSION_NETWORK=host\n' \
+    >"$workdir/host.env"
+out="$(run_make up P=host.env)"
+check_contains 'preset network mode is honored' 'compose.host.yaml' "$out"
+check_missing 'preset network mode skips the ports override' 'compose.netns.yaml' "$out"
 
 # A host data directory adds the storage override and changes teardown.
 out="$(run_make up P=data.env)"

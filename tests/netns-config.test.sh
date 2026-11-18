@@ -87,6 +87,9 @@ else
 fi
 check 'missing preset is reported' '1' "$(grep -c 'missing preset' "$workdir/missing.log")"
 
+check_contains 'container mode defaults to netns' \
+    '${SESSION_NETWORK:-netns}' "$(cat "$repo_root/compose.yaml")"
+
 if ! docker compose version >/dev/null 2>&1; then
     printf 'skip compose render: docker compose is not available\n'
 else
