@@ -8,6 +8,16 @@ trap 'rm -rf "$workdir"' EXIT
 
 failures=0
 
+check_contains() {
+    local label="$1" needle="$2" file="$3"
+    if grep -Fq -- "$needle" "$file"; then
+        printf 'ok   %s\n' "$label"
+    else
+        printf 'FAIL %s: missing [%s] in %s\n' "$label" "$needle" "$file" >&2
+        failures=$((failures + 1))
+    fi
+}
+
 check() {
     local label="$1" expected="$2" actual="$3"
     if [ "$expected" = "$actual" ]; then
@@ -17,6 +27,8 @@ check() {
         failures=$((failures + 1))
     fi
 }
+
+check_contains "setup keeps the capture layer out of gamescope" "unset OBS_VKCAPTURE" "$repo_root/scripts/eden-setup.sh"
 
 mkdir -p "$workdir/bin" "$workdir/home" "$workdir/run"
 eden_log="$workdir/eden.log"

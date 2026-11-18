@@ -12,6 +12,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/game-lib.sh"
 GAMES_CATALOG_PATH="${GAMES_CATALOG_PATH:-/config/games/games.json}"
 VULCAN_RUN_DIR="${VULCAN_RUN_DIR:-/data/run}"
 
+# The setup window is not a capture target. Clear the variable so the capture
+# layer does not load into gamescope's Vulkan instance.
+unset OBS_VKCAPTURE
+
 validate_games_catalog "$GAMES_CATALOG_PATH" || exit 1
 if ! catalog_has_eden_runner "$GAMES_CATALOG_PATH"; then
     printf '[vulcan] no eden entry in the catalog\n' >&2
