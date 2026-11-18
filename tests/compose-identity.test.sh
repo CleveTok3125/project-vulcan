@@ -36,7 +36,8 @@ fi
 
 repo="$workdir/repo"
 mkdir -p "$repo/.generated" "$workdir/source"
-cp "$repo_root/compose.yaml" "$repo_root/compose.nvidia.yaml" "$repo_root/compose.data.yaml" "$repo/"
+cp "$repo_root/compose.yaml" "$repo_root/compose.host.yaml" \
+    "$repo_root/compose.nvidia.yaml" "$repo_root/compose.data.yaml" "$repo/"
 printf '{"games":[]}\n' >"$repo/.generated/games.json"
 printf 'services:\n  game:\n    volumes: []\n' >"$repo/.generated/compose.games.yaml"
 
@@ -56,7 +57,7 @@ EOF
 
 render() {
     BASE_IMAGE=vulcan/base:test docker compose --env-file "$1" \
-        -f "$repo/compose.yaml" -f "$repo/compose.nvidia.yaml" \
+        -f "$repo/compose.yaml" -f "$repo/compose.host.yaml" -f "$repo/compose.nvidia.yaml" \
         -f "$repo/.generated/compose.games.yaml" \
         config 2>/dev/null
 }
@@ -67,6 +68,8 @@ check_project() {
     check_contains "${label} container name" "container_name: vulcan-${session_id}" "$config"
     check_contains "${label} volume name" "name: vulcan_${session_id}-data" "$config"
     check_contains "${label} apollo port" "APOLLO_PORT: \"${apollo_port}\"" "$config"
+    check_contains "${label} shares the host namespace" "network_mode: host" "$config"
+    check_missing "${label} publishes no ports" "published:" "$config"
     check_contains "${label} catalog mount" "target: /config/games" "$config"
     check_missing "${label} leaves the other session alone" "vulcan-${other_session_id}" "$config"
     check_missing "${label} passes no input devices" "c 13:" "$config"
@@ -89,7 +92,7 @@ data_dir="$workdir/data"
 mkdir -p "$data_dir"
 data_config="$(BASE_IMAGE=vulcan/base:test VULCAN_DATA_DIR="$data_dir" \
     docker compose --env-file "$workdir/first.env" \
-    -f "$repo/compose.yaml" -f "$repo/compose.nvidia.yaml" \
+    -f "$repo/compose.yaml" -f "$repo/compose.host.yaml" -f "$repo/compose.nvidia.yaml" \
     -f "$repo/compose.data.yaml" -f "$repo/.generated/compose.games.yaml" \
     config 2>/dev/null)"
 check_contains 'host data driver' 'driver: local' "$data_config"

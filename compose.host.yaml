@@ -1,0 +1,9 @@
+# Shares the host network namespace with the session.
+#
+# This is the default mode. Apollo binds its listeners directly on the host,
+# and the OBS capture sender reaches the host plugin over the abstract unix
+# socket, which only exists in the host namespace. Presets that run at the same
+# time need disjoint APOLLO_PORT ranges; `make check-ports` enforces that.
+services:
+  game:
+    network_mode: host

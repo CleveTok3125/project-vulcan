@@ -17,7 +17,9 @@ services:
     pull_policy: never
     container_name: "vulcan-${SESSION_ID}"
     init: true
-    network_mode: host
+    # Networking comes from the preset: compose.host.yaml shares the host
+    # namespace, while SESSION_NETWORK=netns publishes the Apollo ports from
+    # .generated/compose.netns.yaml and keeps the session loopback private.
     read_only: true
     # Do not start automatically after a host reboot.
     restart: "no"
@@ -65,6 +67,7 @@ services:
 
     environment:
       SESSION_ID: "${SESSION_ID:?set SESSION_ID in the selected env file}"
+      SESSION_NETWORK: "${SESSION_NETWORK:-host}"
       GAMES_CATALOG_PATH: "/config/games/games.json"
       GAME_WIDTH: "${GAME_WIDTH:-1920}"
       GAME_HEIGHT: "${GAME_HEIGHT:-1080}"

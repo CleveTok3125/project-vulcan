@@ -82,10 +82,16 @@ OBS_GAMECAPTURE_BIN="${OBS_GAMECAPTURE_BIN:-/usr/bin/obs-gamecapture}"
 # wrap_capture prefixes a runner array with the capture sender.
 #
 # Multiple sessions may run the same executable, so each one carries a distinct
-# capture name that OBS can select.
+# capture name that OBS can select. The sender and the host plugin meet on an
+# abstract unix socket, which the kernel scopes to the network namespace, so a
+# session with its own namespace cannot reach the plugin.
 wrap_capture() {
     local -n target="$1"
     [ "$OBS_VKCAPTURE" = "1" ] || return 0
+    if [ "${SESSION_NETWORK:-host}" = "netns" ]; then
+        printf '[vulcan] OBS capture needs the host network namespace; capture disabled\n' >&2
+        return 0
+    fi
     export OBS_VKCAPTURE_NAME="${OBS_VKCAPTURE_NAME:-${SESSION_ID:-vulcan}-${GAME_ID}}"
     if [ -x "$OBS_GAMECAPTURE_BIN" ]; then
         target=("$OBS_GAMECAPTURE_BIN" "${target[@]}")

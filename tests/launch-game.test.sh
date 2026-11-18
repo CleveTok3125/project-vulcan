@@ -221,6 +221,13 @@ check 'custom capture name is preserved' 'custom-name' \
 run_launch test OBS_VKCAPTURE=0 2>"$workdir/no-capture.log"
 check 'game capture can be disabled' '0' "$(grep -c '^gamecapture:' "$capture_log")"
 
+# A session with its own network namespace cannot reach the host capture plugin.
+: >"$capture_log"
+run_launch test SESSION_NETWORK=netns 2>"$workdir/netns-capture.log"
+check 'netns session skips the capture sender' '0' "$(grep -c '^gamecapture:' "$capture_log")"
+check 'netns session reports the capture skip' '1' \
+    "$(grep -c 'OBS capture needs the host network namespace' "$workdir/netns-capture.log")"
+
 # With gamescope, the wrapper stays inside the gamescope command line.
 : >"$capture_log"
 run_launch test GAMESCOPE_ENABLED=1 2>"$workdir/gamescope.log"

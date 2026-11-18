@@ -40,6 +40,9 @@ MIRROR_COUNTRY ?=
 OBS_VKCAPTURE_REF ?= v1.5.6
 EDEN_VERSION ?= 0.2.1
 EDEN_SHA256 ?= 2fae658397daf13c118082a3eb65d61a6519967b5e22e6667756baecf6000c5a
+# host shares the host network namespace (default); netns gives the session its
+# own namespace and publishes the Apollo ports. OBS capture needs host.
+SESSION_NETWORK ?= host
 GAMES_CATALOG ?= games.yaml
 AUDIO_RUNTIME_DIR ?= $(if $(XDG_RUNTIME_DIR),$(XDG_RUNTIME_DIR),/run/user/$(shell id -u))/vulcan/$(SESSION_ID)
 AUDIO_LATENCY_MSEC ?= 60
@@ -49,6 +52,7 @@ AUDIO_MONITOR_LATENCY_MSEC ?= 100
 YQ ?= yq
 GAMES_OUTPUT_DIR := .generated
 GAMES_COMPOSE := $(GAMES_OUTPUT_DIR)/compose.games.yaml
+NETNS_COMPOSE := $(GAMES_OUTPUT_DIR)/compose.netns.yaml
 
 # The shared environment image is built once per host; the game image adds the
 # vendor packages, Apollo, and the session parts on top of it.
@@ -72,7 +76,8 @@ export IMAGE_TAG
 # node from the base compose file only.
 COMPOSE_NVIDIA := $(if $(filter nvidia,$(GPU_VENDOR)),-f compose.nvidia.yaml,)
 COMPOSE_DATA := $(if $(strip $(VULCAN_DATA_DIR)),-f compose.data.yaml,)
-COMPOSE = AUDIO_RUNTIME_DIR="$(AUDIO_RUNTIME_DIR)" docker compose --env-file $(P_SINGLE) -f compose.yaml $(COMPOSE_NVIDIA) $(COMPOSE_DATA) -f $(GAMES_COMPOSE)
+COMPOSE_NETWORK := $(if $(filter netns,$(SESSION_NETWORK)),-f $(NETNS_COMPOSE),-f compose.host.yaml)
+COMPOSE = AUDIO_RUNTIME_DIR="$(AUDIO_RUNTIME_DIR)" docker compose --env-file $(P_SINGLE) -f compose.yaml $(COMPOSE_NETWORK) $(COMPOSE_NVIDIA) $(COMPOSE_DATA) -f $(GAMES_COMPOSE)
 CONTAINER := vulcan-$(SESSION_ID)
 VOLUME := vulcan_$(SESSION_ID)-data
 UNINSTALL_VOLUME = $(if $(strip $(VULCAN_DATA_DIR)),$(COMPOSE) down,$(COMPOSE) down -v)
@@ -400,6 +405,9 @@ _check-presets:
 _games-config:
 ifeq ($(P_COUNT),1)
 	@YQ="$(YQ)" scripts/generate-games-config.sh "$(GAMES_CATALOG)" "$(GAMES_OUTPUT_DIR)"
+ifeq ($(SESSION_NETWORK),netns)
+	@scripts/generate-netns-config.sh "$(P_SINGLE)" "$(NETNS_COMPOSE)"
+endif
 else
 	@:
 endif

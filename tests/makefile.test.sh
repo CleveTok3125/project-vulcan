@@ -82,6 +82,19 @@ check_missing 'amd preset skips the nvidia override' 'compose.nvidia.yaml' "$out
 out="$(run_make up P=intel.env)"
 check_missing 'intel preset skips the nvidia override' 'compose.nvidia.yaml' "$out"
 
+# The default network mode shares the host namespace; netns publishes the ports.
+out="$(run_make up)"
+check_contains 'host mode adds the host override' 'compose.host.yaml' "$out"
+check_missing 'host mode publishes no ports' 'compose.netns.yaml' "$out"
+out="$(run_make up SESSION_NETWORK=netns)"
+check_contains 'netns mode publishes the apollo ports' 'compose.netns.yaml' "$out"
+check_missing 'netns mode skips the host override' 'compose.host.yaml' "$out"
+printf 'SESSION_ID=demo\nGAMES_CATALOG=games.yaml\nSESSION_NETWORK=netns\n' \
+    >"$workdir/netns.env"
+out="$(run_make up P=netns.env)"
+check_contains 'preset network mode is honored' 'compose.netns.yaml' "$out"
+check_missing 'preset network mode skips the host override' 'compose.host.yaml' "$out"
+
 # A host data directory adds the storage override and changes teardown.
 out="$(run_make up P=data.env)"
 check_contains 'host data adds the storage override' 'compose.data.yaml' "$out"

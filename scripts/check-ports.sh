@@ -1,8 +1,10 @@
 #!/bin/bash
 # Rejects Apollo presets whose port ranges overlap.
 #
-# Apollo offsets every listener from APOLLO_PORT, and the presets share the
-# host network namespace, so two ranges on the same protocol cannot coexist.
+# Apollo offsets every listener from APOLLO_PORT, and the listeners end up on
+# the host in both network modes: bound directly with SESSION_NETWORK=host and
+# published with SESSION_NETWORK=netns. Two ranges on the same protocol cannot
+# coexist.
 set -Eeuo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
