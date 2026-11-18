@@ -191,6 +191,18 @@ RUN --mount=type=cache,target=/var/cache/pacman/pkg,sharing=locked \
     && cmake --build /src/obs-vkcapture/build -j"$(nproc)" \
     && DESTDIR=/out cmake --install /src/obs-vkcapture/build
 
+# The namespace relay frames the sender stream by message size, so a size
+# change in the pinned source has to stop the build instead of breaking
+# capture at runtime.
+RUN printf '%s\n' \
+        '#include "capture.h"' \
+        '_Static_assert(CAPTURE_CLIENT_DATA_SIZE == 128, "frame size changed");' \
+        '_Static_assert(CAPTURE_TEXTURE_DATA_SIZE == 128, "frame size changed");' \
+        '_Static_assert(CAPTURE_CONTROL_DATA_SIZE == 32, "control size changed");' \
+        'int main(void) { return 0; }' >/tmp/vkcapture-sizes.c \
+    && cc -I/src/obs-vkcapture/src -o /tmp/vkcapture-sizes /tmp/vkcapture-sizes.c \
+    && /tmp/vkcapture-sizes
+
 FROM build-tools AS eden-builder
 
 # The emulator ships as an AppImage. Extracting it at build time keeps FUSE out
@@ -223,6 +235,7 @@ COPY --from=eden-builder /out/eden /opt/eden
 COPY --from=rust-builder /build/target/release/libvulcan_uinput_shim.so /usr/lib/libvulcan_uinput_shim.so
 COPY --from=rust-builder /build/target/release/vulcan-inputd /usr/local/bin/vulcan-inputd
 COPY --from=rust-builder /build/target/release/vulcan-dsud /usr/local/bin/vulcan-dsud
+COPY --from=rust-builder /build/target/release/vulcan-capture-bridge /usr/local/bin/vulcan-capture-bridge
 
 COPY --from=vkcapture-builder /out/usr/ /usr/
 
@@ -240,6 +253,7 @@ RUN chmod 0755 \
         /usr/local/bin/*.sh \
         /usr/local/bin/vulcan-inputd \
         /usr/local/bin/vulcan-dsud \
+        /usr/local/bin/vulcan-capture-bridge \
     && ln -s /usr/local/bin/eden-wrapper.sh /usr/local/bin/eden \
     && chmod 0644 \
         /usr/lib/vulcan/xinput1_4.dll \

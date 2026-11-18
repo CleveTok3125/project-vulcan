@@ -1,0 +1,12 @@
+[package]
+name = "vulcan-capture-bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+libc = "0.2"
+
+[[bin]]
+name = "vulcan-capture-bridge"
+path = "src/main.rs"

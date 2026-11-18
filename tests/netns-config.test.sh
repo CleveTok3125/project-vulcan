@@ -105,6 +105,14 @@ else
         "$(printf '%s\n' "$netns_config" | grep -c 'published:')"
     check_contains 'netns mode publishes the web port' 'published: "48007"' "$netns_config"
     check_contains 'netns mode keeps the session network' 'name: vulcan-demo_default' "$netns_config"
+    check_missing 'netns mode leaves the relay out without the profile' \
+        'vulcan-capture-bridge' "$netns_config"
+
+    netns_profile="$(BASE_IMAGE=vulcan/base:test docker compose --profile netns \
+        --env-file "$workdir/preset.env" -f "$repo_root/compose.yaml" \
+        -f "$netns_override" config 2>/dev/null)"
+    check_contains 'netns profile adds the capture relay' 'vulcan-capture-bridge' "$netns_profile"
+    check_contains 'capture relay has its own container' 'vulcan-demo-capture' "$netns_profile"
 fi
 
 if [ "$failures" -ne 0 ]; then

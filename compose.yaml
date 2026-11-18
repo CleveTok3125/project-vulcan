@@ -84,6 +84,7 @@ services:
       INPUT_GAMEPAD: "${INPUT_GAMEPAD:-1}"
       VULCAN_DSUD: "${VULCAN_DSUD:-1}"
       VULCAN_DSUD_PORT: "${VULCAN_DSUD_PORT:-26760}"
+      VULCAN_CAPTURE_SOCKET: "${VULCAN_CAPTURE_SOCKET:-/run/vulcan-audio/capture.sock}"
       ENABLE_OVERLAY: "${ENABLE_OVERLAY:-1}"
 
       RENDER_NODE: "${RENDER_NODE:?set RENDER_NODE in the selected env file}"
@@ -119,6 +120,25 @@ services:
       memlock:
         soft: -1
         hard: -1
+
+  # Host side of the capture relay. A session with its own network namespace
+  # cannot reach the abstract unix socket the OBS plugin binds, so the session
+  # forwards connections here and this service hands them to the plugin. It
+  # shares the host namespace and the session runtime directory; the profile
+  # keeps it out of host-networked sessions.
+  capture:
+    image: "vulcan/game-stream:${IMAGE_TAG:-local}"
+    pull_policy: never
+    container_name: "vulcan-${SESSION_ID}-capture"
+    profiles: ["netns"]
+    network_mode: host
+    read_only: true
+    restart: "no"
+    user: "1000:1000"
+    entrypoint: ["/usr/local/bin/vulcan-capture-bridge", "host"]
+    command: ["--socket", "${VULCAN_CAPTURE_SOCKET:-/run/vulcan-audio/capture.sock}"]
+    volumes:
+      - "${AUDIO_RUNTIME_DIR:?set AUDIO_RUNTIME_DIR in the selected env file}:/run/vulcan-audio"
 
 volumes:
   # Each session keeps its Wine prefixes and overlay writes.

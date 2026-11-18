@@ -43,8 +43,12 @@ check_contains 'image tag includes the capture ref' '$(OBS_VKCAPTURE_REF)' "$mak
 check_contains 'launcher defaults capture on' 'OBS_VKCAPTURE="${OBS_VKCAPTURE:-1}"' "$launcher"
 check_contains 'launcher wraps the runner' 'target=("$OBS_GAMECAPTURE_BIN" "${target[@]}")' "$launcher"
 check_contains 'launcher uses the capture helper for wine' 'wrap_capture runner' "$launcher"
-check_contains 'launcher requires the host namespace for capture' \
+check_missing 'launcher does not skip capture in a session namespace' \
     'OBS capture needs the host network namespace' "$launcher"
+check_contains 'image ships the capture relay' 'vulcan-capture-bridge' "$dockerfile"
+check_contains 'image asserts the relay frame size' 'CAPTURE_TEXTURE_DATA_SIZE == 128' "$dockerfile"
+check_contains 'session start runs the relay for netns sessions' \
+    'vulcan-capture-bridge game' "$repo_root/scripts/session-start.sh"
 check_contains 'capture name is session scoped' 'OBS_VKCAPTURE_NAME' "$launcher"
 
 if [ "$failures" -ne 0 ]; then

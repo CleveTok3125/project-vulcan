@@ -19,7 +19,8 @@ Docker (rootful)
    │  └─ wine + selected game, or eden + selected game image
    ├─ PipeWire (Apollo audio sink)
    ├─ vulcan-inputd (socket -> gamescope EIS)
-   └─ vulcan-dsud (pad state -> Cemuhook UDP)
+   ├─ vulcan-dsud (pad state -> Cemuhook UDP)
+   └─ vulcan-capture-bridge (vkcapture relay in netns)
 ```
 
 The container receives the render node named by `RENDER_NODE`. On NVIDIA,
@@ -473,8 +474,8 @@ reach a preset with a custom base port.
   ports from `.generated/compose.netns.yaml`. Loopback stays inside the
   session, so the gamepad server and Wine services are isolated between
   sessions. The client still uses the host address and the same port numbers.
-  OBS capture is skipped, and LAN broadcast discovery does not cross the
-  bridge.
+  OBS capture keeps working through the capture relay, and LAN broadcast
+  discovery does not cross the bridge.
 
 Both sessions share one GPU, so VRAM and memory bandwidth apply to the sum of
 the streams. On NVIDIA, the NVENC session limit and device configuration also
@@ -687,9 +688,20 @@ host:      OBS -> linux-vkcapture plugin -> DMA-BUF
 ```
 
 The sender and the plugin meet on an abstract unix socket, which the kernel
-scopes to the network namespace. Capture therefore needs
-`SESSION_NETWORK=host`, the default; a `netns` session skips the capture
-sender with a warning. This does not change the Sway/Apollo path.
+scopes to the network namespace. The default `SESSION_NETWORK=host` shares it
+directly. A `netns` session runs `vulcan-capture-bridge`: the session side
+binds the sender's abstract name and forwards each connection over a sequpacket
+socket in the session runtime directory, and the `capture` service shares the
+host namespace and hands the connection to the plugin. Frames keep their dmabuf
+descriptors, so the plugin imports the same buffers as with a direct
+connection.
+
+The relay frames the sender stream with the fixed message sizes of the pinned
+`OBS_VKCAPTURE_REF`. The image build fails when those sizes change, so the host
+plugin must use the same reference. The `capture` service exists only in
+`netns` mode and runs as the game user. `VULCAN_CAPTURE_SOCKET` moves the relay
+socket; both sides share the session runtime directory. This does not change
+the Sway/Apollo path.
 
 `OBS_VKCAPTURE=1` is the default. The capture source name defaults to
 `<SESSION_ID>-<GAME_ID>`, so two sessions running the same executable remain
@@ -984,8 +996,9 @@ grab the other's devices.
 The default `SESSION_NETWORK=host` shares the host network namespace, so
 loopback endpoints such as the gamepad server are reachable from every
 session. `SESSION_NETWORK=netns` gives the session its own namespace and
-publishes only the Apollo ports, which isolates those endpoints; OBS capture
-needs the shared namespace and is skipped.
+publishes only the Apollo ports, which isolates those endpoints. OBS capture
+still works there: the session relays the sender connection to the `capture`
+service in the host namespace.
 
 ## Logs
 
@@ -994,10 +1007,14 @@ docker compose --env-file .env.local exec game tail -f /data/apollo/sunshine.log
 docker compose --env-file .env.local exec game tail -f /data/log/session-start.log
 docker compose --env-file .env.local exec game tail -f /data/log/sway.log
 docker compose --env-file .env.local exec game tail -f /data/log/vulcan-inputd.log
+docker compose --env-file .env.local exec game tail -f /data/log/vulcan-capture-bridge.log
 ```
 
 Apollo writes its own log to `/data/apollo/sunshine.log`. `session-start.log`
 holds the session startup and Apollo console output; `sway.log` holds Sway only.
+`vulcan-capture-bridge.log` exists in `netns` sessions and records relay
+connections; the host half of the relay logs to
+`docker logs vulcan-<SESSION_ID>-capture`.
 `APOLLO_LOG_LEVEL` defaults to `2` (info); `0` and `1` enable verbose/debug
 logging and grow quickly during streaming.
 
@@ -1138,7 +1155,7 @@ Additional hardening:
 - The DSU server listens on loopback. In the default `SESSION_NETWORK=host`
   every session shares that namespace, so concurrent Eden sessions need
   distinct `VULCAN_DSUD_PORT` values; `SESSION_NETWORK=netns` isolates the
-  endpoint but disables OBS capture.
+  endpoint.
 - A native entry needs `prod.keys` and firmware in its session volume, and its
   controller mapping is created once per volume through the setup app.
 - OBS audio is an opt-in host tunnel. The source exists only while the Apollo

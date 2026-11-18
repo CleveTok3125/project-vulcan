@@ -1,5 +1,5 @@
 [workspace]
-members = ["proto", "shim", "inputd", "dsud"]
+members = ["proto", "shim", "inputd", "dsud", "capture"]
 resolver = "2"
 
 [workspace.package]

@@ -86,9 +86,11 @@ check_missing 'intel preset skips the nvidia override' 'compose.nvidia.yaml' "$o
 out="$(run_make up)"
 check_contains 'host mode adds the host override' 'compose.host.yaml' "$out"
 check_missing 'host mode publishes no ports' 'compose.netns.yaml' "$out"
+check_missing 'host mode leaves the capture profile off' '--profile netns' "$out"
 out="$(run_make up SESSION_NETWORK=netns)"
 check_contains 'netns mode publishes the apollo ports' 'compose.netns.yaml' "$out"
 check_missing 'netns mode skips the host override' 'compose.host.yaml' "$out"
+check_contains 'netns mode enables the capture profile' '--profile netns' "$out"
 printf 'SESSION_ID=demo\nGAMES_CATALOG=games.yaml\nSESSION_NETWORK=netns\n' \
     >"$workdir/netns.env"
 out="$(run_make up P=netns.env)"

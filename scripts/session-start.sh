@@ -76,5 +76,18 @@ if [ "$INPUT_TRANSPORT" = "socket" ]; then
     printf '[vulcan] socket input on %s\n' "$VULCAN_INPUT_SOCKET"
 fi
 
+# The OBS plugin binds an abstract unix socket, which a session network
+# namespace cannot reach. The session side of the relay takes that name and
+# forwards each connection to the capture service on the host.
+if [ "${SESSION_NETWORK:-host}" = "netns" ] && [ "${OBS_VKCAPTURE:-1}" = "1" ]; then
+    if [ -x /usr/local/bin/vulcan-capture-bridge ]; then
+        env -u LD_PRELOAD /usr/local/bin/vulcan-capture-bridge game \
+            --socket "${VULCAN_CAPTURE_SOCKET:-/run/vulcan-audio/capture.sock}" \
+            >>/data/log/vulcan-capture-bridge.log 2>&1 &
+    else
+        printf '[vulcan] vulcan-capture-bridge not found; OBS capture disabled\n' >&2
+    fi
+fi
+
 printf '[vulcan] starting Apollo on %s (%s)\n' "$WAYLAND_DISPLAY" "$SWAYSOCK"
 exec apollo /data/apollo/sunshine.conf
