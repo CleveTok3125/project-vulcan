@@ -215,6 +215,9 @@ patch in the `apollo-builder` stage until Apollo supports the newer headers.
 
 Update the pinned inputs together when intentionally upgrading the image.
 
+Local patches for pinned sources live in `docker/patches/`; see
+[`docker/patches/README.md`](docker/patches/README.md).
+
 ## 5. Configuration
 
 The example files are the configuration reference:

@@ -49,7 +49,7 @@ RUN useradd -m -u 1001 builder \
 USER builder
 WORKDIR /home/builder
 
-COPY docker/apollo-rumble.patch /home/builder/apollo-rumble.patch
+COPY docker/patches/apollo-rumble.patch /home/builder/apollo-rumble.patch
 
 # apollo-git builds its CUDA frame conversion path only when the cuda package
 # is installed. Without it nvenc initializes but the encoder test fails with
