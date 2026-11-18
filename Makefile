@@ -84,6 +84,8 @@ COMPOSE_DATA := $(if $(strip $(VULCAN_DATA_DIR)),-f compose.data.yaml,)
 COMPOSE = AUDIO_RUNTIME_DIR="$(AUDIO_RUNTIME_DIR)" docker compose --env-file $(P_SINGLE) -f compose.yaml -f $(NETNS_COMPOSE) $(COMPOSE_NVIDIA) $(COMPOSE_DATA) -f $(GAMES_COMPOSE)
 CONTAINER := vulcan-$(SESSION_ID)
 VOLUME := vulcan_$(SESSION_ID)-data
+# compose names the default bridge after the project: <project>_default.
+NETWORK := vulcan-$(SESSION_ID)_default
 UNINSTALL_VOLUME = $(if $(strip $(VULCAN_DATA_DIR)),$(COMPOSE) down,$(COMPOSE) down -v)
 UNINSTALL_DATA_NOTE = $(if $(strip $(VULCAN_DATA_DIR)),printf '[vulcan] host data kept at: %s\n' '$(VULCAN_DATA_DIR)',:)
 
@@ -120,7 +122,7 @@ endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help base base-rebuild base-export rm-base images volume volumes _volume-name build up rebuild _recreate stop down restart logs ps up-all down-all stop-all restart-all ps-all build-all stats-all uninstall-all check-ports check-xinput check-rust ports _check-presets _check-ports _games-config _audio-runtime _data-runtime audio-up audio-down audio-status config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
+.PHONY: help base base-rebuild base-export rm-base images volume volumes network _volume-name build up rebuild _recreate stop down restart logs ps up-all down-all stop-all restart-all ps-all build-all stats-all uninstall-all check-ports check-xinput check-rust ports _check-presets _check-ports _games-config _audio-runtime _data-runtime audio-up audio-down audio-status config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
 
 # The table keeps the file order of the targets inside each section. A `# ---`
 # line between blocks starts a new group, which the table separates with a blank
@@ -331,6 +333,28 @@ volume: ## [preset] Show the volume of the selected preset
 	docker volume inspect "$$name" --format 'created={{.CreatedAt}}'; \
 	size=$$(docker system df -v | awk -v v="$$name" '$$1 == v {print $$3}'); \
 	printf 'size=%s\n' "$${size:-unknown}"
+
+network: _check-presets ## [presets] Show the session networks and their containers
+ifeq ($(P_COUNT),1)
+	@name="$(NETWORK)"; \
+	if ! docker network inspect "$$name" >/dev/null 2>&1; then \
+		printf '%s (missing; is the session running?)\n' "$$name"; exit 0; \
+	fi; \
+	docker network inspect "$$name" --format 'name={{.Name}} id={{.Id}}'; \
+	docker network inspect "$$name" --format 'driver={{.Driver}} scope={{.Scope}}'; \
+	docker network inspect "$$name" --format '{{with index .IPAM.Config 0}}subnet={{.Subnet}} gateway={{.Gateway}}{{end}}'; \
+	containers=$$(docker network inspect "$$name" --format '{{range .Containers}}{{.Name}} {{.IPv4Address}}{{"\n"}}{{end}}'); \
+	if [ -n "$$containers" ]; then \
+		printf 'containers:\n%s\n' "$$containers"; \
+	else \
+		printf 'containers: none\n'; \
+	fi
+else
+	@for preset in $(P_LIST); do \
+		printf '[vulcan] P=%s\n' "$$preset"; \
+		$(MAKE) --no-print-directory network P="$$preset" || exit 1; \
+	done
+endif
 
 _volume-name:
 	@printf '%s\n' '$(VOLUME)'

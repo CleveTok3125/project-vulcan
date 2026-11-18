@@ -89,6 +89,14 @@ check_contains 'session publishes the apollo ports' 'compose.netns.yaml' "$out"
 check_missing 'session has no host override' 'compose.host.yaml' "$out"
 check_missing 'network mode variable is gone' 'SESSION_NETWORK=' "$out"
 
+out="$(run_make network P=preset.env)"
+check_contains 'network target inspects the session network' 'vulcan-demo_default' "$out"
+check_contains 'network target reads the network' 'docker network inspect' "$out"
+
+out="$(run_make network P=".env.local:preset.env")"
+check_contains 'network lists the first session' 'vulcan-alpha_default' "$out"
+check_contains 'network lists the second session' 'vulcan-demo_default' "$out"
+
 # A pinned base image keys the game image tag and is never rebuilt.
 default_tag="$(cd "$workdir" && make --no-print-directory --eval='print-tag: ; @echo $(IMAGE)' print-tag)"
 pinned_tag="$(cd "$workdir" && make --no-print-directory --eval='print-tag: ; @echo $(IMAGE)' print-tag BASE_IMAGE=sha256:abc)"
