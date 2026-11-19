@@ -43,10 +43,11 @@ is not used.
 - [9. Logs](#9-logs)
 - [10. Maintenance](#10-maintenance)
   - [10.1 Session cleanup](#101-session-cleanup)
-  - [10.2 Updating game files](#102-updating-game-files)
-    - [10.2.1 Stale overlay after a host update](#1021-stale-overlay-after-a-host-update)
-  - [10.3 Recreating a Wine prefix](#103-recreating-a-wine-prefix)
-  - [10.4 Migrating from per-game presets](#104-migrating-from-per-game-presets)
+  - [10.2 Shader caches](#102-shader-caches)
+  - [10.3 Updating game files](#103-updating-game-files)
+    - [10.3.1 Stale overlay after a host update](#1031-stale-overlay-after-a-host-update)
+  - [10.4 Recreating a Wine prefix](#104-recreating-a-wine-prefix)
+  - [10.5 Migrating from per-game presets](#105-migrating-from-per-game-presets)
 - [11. Security](#11-security)
 - [12. Limitations](#12-limitations)
 - [13. Validation checklist](#13-validation-checklist)
@@ -869,6 +870,9 @@ selected env file:
   leak into the container.
 - `__GL_SHADER_DISK_CACHE_SKIP_CLEANUP=1` keeps the NVIDIA GL shader cache
   instead of letting the driver prune it.
+- `DXVK_SHADER_CACHE_PATH` and `DXVK_STATE_CACHE_PATH` keep the DXVK cache in
+  `/data/home/.cache/dxvk`. `launch-game.sh` sets both defaults, so the cache
+  survives a prefix or AppData reset.
 - `D3D_BACKEND=dxvk` uses the DXVK DLLs; `wined3d` uses Wine's OpenGL path.
 - `DXVK_HOST_DIR` is the host DXVK directory mounted at `/data/dxvk`;
   `DXVK_DIR` overrides the container path.
@@ -1084,10 +1088,14 @@ Session cleanup targets remove parts of the volume and keep Apollo state:
 | `make clean-logs` | `/data/log/*` |
 | `make clean-overlay` | `/data/overlay/*/{upper,work}/*` and `/data/prefix/*/.vulcan-reset-paths` |
 | `make clean-appdata` | `/data/prefix/*/drive_c/users/*/AppData` |
-| `make clean-all` | all of the above |
+| `make clean-shader-cache` | every compiled shader cache listed in [10.2](#102-shader-caches) |
+| `make clean-all` | all of the above except the shader caches |
 
 Each target stops the container, removes its paths, and starts the container
 again.
+
+`clean-shader-cache` and `uninstall` are the only targets that remove the
+compiled shader caches; the other cleanup targets leave them in place.
 
 `clean-overlay` also drops the reset markers: the fresh overlays no longer
 hold the whiteouts from the previous reset, so the next launch applies the
@@ -1095,7 +1103,36 @@ catalog `reset_paths` again. Use it after the host changes files the
 container had already written, since the overlay keeps the container's copy
 until it is removed.
 
-### 10.2 Updating game files
+### 10.2 Shader caches
+
+Games and emulators keep compiled shaders in the session volume, so they
+survive container recreation:
+
+| Cache | Path |
+| --- | --- |
+| DXVK | `/data/home/.cache/dxvk` |
+| DXVK, older sessions | `/data/prefix/*/drive_c/users/*/AppData/Local/dxvk` |
+| NVIDIA OpenGL | `/data/home/.cache/nvidia/GLCache` and the legacy `/data/home/.nv/GLCache` |
+| Mesa | `/data/home/.cache/mesa_shader_cache` |
+| Eden | `/data/home/.local/share/eden/shader` |
+
+DXVK stores its cache outside the prefix because the Windows build prefers
+`LOCALAPPDATA`; `launch-game.sh` sets `DXVK_SHADER_CACHE_PATH` and
+`DXVK_STATE_CACHE_PATH` to keep it in the XDG cache directory. A session
+created before those variables were set keeps its cache under the prefix path
+in the table above, and `clean-shader-cache` removes that one too.
+
+Removing a prefix or its AppData leaves the caches intact. A DXVK or driver
+update invalidates the entries compiled by the previous version; the game
+rebuilds the ones it needs on the next launch. The caches hold no save data,
+so the only cost of removing them is the recompile itself: expect stutter
+while the game or emulator builds the shaders it needs again.
+
+`__GL_SHADER_DISK_CACHE_SKIP_CLEANUP=1` stops the driver from pruning the
+NVIDIA cache, so it grows with every OpenGL client in the session. Run
+`clean-shader-cache` when it takes too much space.
+
+### 10.3 Updating game files
 
 To update a game, stop the container and run the updater/launcher outside the
 streaming container, or start a separate maintenance container with a
@@ -1103,7 +1140,7 @@ read-write mount. Do not expose a read-write game directory while streaming.
 Run `make clean-overlay` afterwards so the container stops using the copies it
 wrote into its overlay and reads the updated tree.
 
-#### 10.2.1 Stale overlay after a host update
+#### 10.3.1 Stale overlay after a host update
 
 An overlay upper layer can outlive the host tree it was built from. The upper
 copy then hides the updated file in the lower layer, and the game keeps reading
@@ -1118,7 +1155,7 @@ a different value in the lower and upper layer confirms the mismatch.
 `clean-overlay` also removes the reset markers, so the catalog `reset_paths`
 runs again on the next launch.
 
-### 10.3 Recreating a Wine prefix
+### 10.4 Recreating a Wine prefix
 
 A game that hangs or crashes before its first frame, while the same game files
 work outside the container, may have a corrupted Wine prefix. Reset one game
@@ -1151,7 +1188,7 @@ service files from a prefix suspected to be corrupt; they can carry the fault
 into the new prefix. Remove the backup after a game has launched from the new
 prefix.
 
-### 10.4 Migrating from per-game presets
+### 10.5 Migrating from per-game presets
 
 Per-game presets are not read by this version. Create `.env.multi` and
 `games.yaml` instead. Old volumes remain on the host; the new session uses

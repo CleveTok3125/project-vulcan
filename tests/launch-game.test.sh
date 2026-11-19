@@ -106,6 +106,8 @@ printf '%s\n' "$*" >>"$WINE_LOG"
 printf 'env:%s:%s:%s:%s:%s\n' \
     "${WINEESYNC-}" "${WINEFSYNC-}" "${XMODIFIERS-}" \
     "${__GL_SHADER_DISK_CACHE_SKIP_CLEANUP-}" "${DXVK_HUD-}" >>"$WINE_LOG"
+printf 'caches:%s:%s\n' \
+    "${DXVK_SHADER_CACHE_PATH-}" "${DXVK_STATE_CACHE_PATH-}" >>"$WINE_LOG"
 printf 'overrides:%s\n' "${WINEDLLOVERRIDES-}" >>"$WINE_LOG"
 if [ "$1" = "wineboot" ]; then
     if [ "${FAKE_WINEBOOT_FAIL:-0}" = "1" ]; then
@@ -202,6 +204,8 @@ check 'prefix is scoped by game' 'yes' \
     "$([ -d "$workdir/prefix/test/drive_c/windows/system32" ] && printf yes || printf no)"
 check 'game starts after init' '1' "$(grep -cx -- "$game_exe" "$wine_log")"
 check 'wine environment defaults' 'yes' "$(grep -qx 'env:1:1:@im=none:1:' "$wine_log" && printf yes || printf no)"
+check 'dxvk cache location defaults' 'yes' \
+    "$(grep -qx 'caches:/data/home/.cache/dxvk:/data/home/.cache/dxvk' "$wine_log" && printf yes || printf no)"
 
 # The default wraps only the Wine command, just like the Lutris prefix command.
 check 'game capture wrapper used' '1' "$(grep -c '^gamecapture:' "$capture_log")"
@@ -316,6 +320,12 @@ check 'missing wine loader does not start game' '0' "$(grep -c -- "$game_exe" "$
 : >"$wine_log"
 run_launch test DXVK_HUD=fps 2>"$workdir/hud.log"
 check 'dxvk hud override' 'yes' "$(grep -qx 'env:1:1:@im=none:1:fps' "$wine_log" && printf yes || printf no)"
+
+# The DXVK cache directory is configurable and defaults outside the prefix.
+: >"$wine_log"
+run_launch test DXVK_SHADER_CACHE_PATH="$workdir/dxvk-cache" 2>"$workdir/shader-cache.log"
+check 'dxvk shader cache override' 'yes' \
+    "$(grep -Fxq "caches:$workdir/dxvk-cache:/data/home/.cache/dxvk" "$wine_log" && printf yes || printf no)"
 
 # The XInput proxy installs and overrides only while the gamepad is enabled.
 xinput_dll="$workdir/xinput1_4.dll"

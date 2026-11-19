@@ -287,11 +287,30 @@ check_contains 'clean-appdata removes AppData' 'drive_c/users/*/AppData' "$out"
 check_missing 'clean-appdata keeps the overlay' '/data/overlay' "$out"
 check_missing 'clean-appdata keeps the logs' '/data/log' "$out"
 
+out="$(run_make clean-shader-cache)"
+check_contains 'clean-shader-cache removes the NVIDIA cache' '/data/home/.cache/nvidia/GLCache' "$out"
+check_contains 'clean-shader-cache removes the Mesa cache' '/data/home/.cache/mesa_shader_cache' "$out"
+check_contains 'clean-shader-cache removes the DXVK cache' '/data/home/.cache/dxvk' "$out"
+check_contains 'clean-shader-cache removes the legacy DXVK cache' 'AppData/Local/dxvk' "$out"
+check_contains 'clean-shader-cache removes the Eden cache' '/data/home/.local/share/eden/shader' "$out"
+check_missing 'clean-shader-cache keeps the logs' '/data/log' "$out"
+check_missing 'clean-shader-cache keeps the overlay' '/data/overlay' "$out"
+check_missing 'clean-shader-cache keeps the reset marker' '.vulcan-reset-paths' "$out"
+
 out="$(run_make clean-all)"
 check_contains 'clean-all removes logs' '/data/log/*' "$out"
 check_contains 'clean-all removes the overlay' '/data/overlay/*/upper' "$out"
 check_contains 'clean-all removes the reset marker' '/data/prefix/*/.vulcan-reset-paths' "$out"
 check_contains 'clean-all removes AppData' 'drive_c/users/*/AppData' "$out"
+
+# Only clean-shader-cache removes the compiled shader caches.
+for target in clean-logs clean-overlay clean-appdata clean-all; do
+    out="$(run_make "$target")"
+    check_missing "$target keeps the NVIDIA cache" 'nvidia/GLCache' "$out"
+    check_missing "$target keeps the Mesa cache" 'mesa_shader_cache' "$out"
+    check_missing "$target keeps the DXVK cache" '.cache/dxvk' "$out"
+    check_missing "$target keeps the Eden cache" 'eden/shader' "$out"
+done
 
 # The bare clean target is gone.
 if (cd "$workdir" && make --no-print-directory -n clean >/dev/null 2>&1); then
@@ -492,6 +511,7 @@ check_section 'base needs no preset' 'base' "$shared"
 check_section 'images need no preset' 'images' "$shared"
 check_section 'logs needs one preset' 'logs' "$single"
 check_section 'clean-all needs one preset' 'clean-all' "$single"
+check_section 'clean-shader-cache needs one preset' 'clean-shader-cache' "$single"
 check_section 'up accepts a list' 'up' "$listed"
 check_section 'uninstall accepts a list' 'uninstall' "$listed"
 check_section 'ports accepts a list' 'ports' "$listed"

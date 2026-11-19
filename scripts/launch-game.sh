@@ -52,6 +52,11 @@ export HOME="${HOME:-/data/home}"
 export XDG_DATA_HOME="${XDG_DATA_HOME:-/data/home/.local/share}"
 export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-/data/home/.config}"
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/data/home/.cache}"
+# The Windows build prefers LOCALAPPDATA, which points into the prefix, so the
+# cache must be redirected to survive prefix and AppData resets.
+# DXVK_STATE_CACHE_PATH covers 2.x, DXVK_SHADER_CACHE_PATH covers 3.x.
+export DXVK_SHADER_CACHE_PATH="${DXVK_SHADER_CACHE_PATH:-/data/home/.cache/dxvk}"
+export DXVK_STATE_CACHE_PATH="${DXVK_STATE_CACHE_PATH:-/data/home/.cache/dxvk}"
 # No input method runs in the container; keep the host one out of the tools.
 export XMODIFIERS="${XMODIFIERS:-@im=none}"
 # Keep the NVIDIA GL shader cache instead of letting the driver prune it.

@@ -122,7 +122,7 @@ endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help base base-rebuild base-export rm-base images volume volumes network _volume-name build up rebuild _recreate stop down restart logs ps up-all down-all stop-all restart-all ps-all build-all stats-all uninstall-all check-ports check-xinput check-rust ports _check-presets _check-ports _games-config _audio-runtime _data-runtime audio-up audio-down audio-status config clean-logs clean-overlay clean-appdata clean-all _clean-session uninstall stats usage btop nvtop shell watch
+.PHONY: help base base-rebuild base-export rm-base images volume volumes network _volume-name build up rebuild _recreate stop down restart logs ps up-all down-all stop-all restart-all ps-all build-all stats-all uninstall-all check-ports check-xinput check-rust ports _check-presets _check-ports _games-config _audio-runtime _data-runtime audio-up audio-down audio-status config clean-logs clean-overlay clean-appdata clean-shader-cache clean-all _clean-session uninstall stats usage btop nvtop shell watch
 
 # The table keeps the file order of the targets inside each section. A `# ---`
 # line between blocks starts a new group, which the table separates with a blank
@@ -140,7 +140,7 @@ help: ## [global] Show available targets
 		description = $$2 ; sub(/^\[[a-z]+\] /, "", description) ; \
 		if (pending_break && (scope in rows)) rows[scope] = rows[scope] "\n" ; \
 		pending_break = 0 ; \
-		rows[scope] = rows[scope] sprintf("  %-14s %s\n", $$1, description) } \
+		rows[scope] = rows[scope] sprintf("  %-20s %s\n", $$1, description) } \
 	END { first = 1 ; \
 		for (i = 1; i <= 3; i++) { scope = scope_order[i] ; \
 			if (!(scope in rows)) continue ; \
@@ -386,6 +386,12 @@ config: _check-presets _games-config _audio-runtime ## [preset] Validate and pri
 CLEAN_LOGS := /data/log/*
 CLEAN_OVERLAY := /data/overlay/*/upper/* /data/overlay/*/work/* /data/prefix/*/.vulcan-reset-paths
 CLEAN_APPDATA := /data/prefix/*/drive_c/users/*/AppData
+CLEAN_SHADER_CACHE := /data/home/.cache/nvidia/GLCache \
+	/data/home/.cache/mesa_shader_cache \
+	/data/home/.cache/dxvk \
+	/data/home/.nv/GLCache \
+	/data/home/.local/share/eden/shader \
+	/data/prefix/*/drive_c/users/*/AppData/Local/dxvk
 
 clean-logs: ## [preset] Remove the session logs
 clean-logs: CLEAN_PATHS := $(CLEAN_LOGS)
@@ -398,6 +404,10 @@ clean-overlay: _clean-session
 clean-appdata: ## [preset] Remove the prefix AppData
 clean-appdata: CLEAN_PATHS := $(CLEAN_APPDATA)
 clean-appdata: _clean-session
+
+clean-shader-cache: ## [preset] Remove the driver and emulator shader caches
+clean-shader-cache: CLEAN_PATHS := $(CLEAN_SHADER_CACHE)
+clean-shader-cache: _clean-session
 
 clean-all: ## [preset] Remove logs, overlay, reset marker, and prefix AppData
 clean-all: CLEAN_PATHS := $(CLEAN_LOGS) $(CLEAN_OVERLAY) $(CLEAN_APPDATA)
